@@ -230,7 +230,6 @@ def evaluate_dataset_subset(
 
     psnr_values = []
     ssim_values = []
-    frc_curves = []
 
     # Initialize metrics
     
@@ -263,73 +262,6 @@ def evaluate_dataset_subset(
             psnr_values.append(psnr_value.item())
             ssim_values.append(ssim_value.item())
 
-            # Calculate FRC
-            # FRC library expects numpy arrays, potentially grayscale
-            # Convert tensors to numpy, remove batch dim, move to CPU, convert to grayscale if needed
-            # sr_np = sr_output_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
-            # hr_np = hr_image_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
-
-            # Convert to grayscale for FRC if it's a color image
-            # if sr_np.shape[-1] == 3:
-            #      sr_np = np.mean(sr_np, axis=-1) # Simple grayscale conversion
-            # if hr_np.shape[-1] == 3:
-            #      hr_np = np.mean(hr_np, axis=-1) # Simple grayscale conversion
-
-            # Ensure images are square and apply windowing if needed by the FRC library
-            # The 'frc' library's example uses square_image and apply_tukey
-            # try:
-                # Need two noise-independent images for standard FRC, or use one_frc
-                # Since we have SR and HR, we'll use standard FRC if possible, or one_frc on SR output
-                # The user asked for FRC between SR and HR, so let's try standard FRC first.
-                # This might require splitting HR into two noisy versions, which is complex.
-                # A simpler interpretation is to calculate FRC of the SR output itself (1FRC) or between SR and HR directly (less standard for resolution metric, but possible for correlation visualization).
-                # Let's calculate FRC between SR and HR as requested, although it's not the standard resolution FRC.
-                # The 'frc' library's main function seems to expect two images.
-                # Let's check the 'frc' library documentation or examples again.
-                # The 'frc' library's `frc.frc` function takes two images.
-                # It also has `frc.one_frc` for a single image.
-                # Given the user's request to compare SR and HR, using `frc.frc(sr_np, hr_np)` seems most direct, though its interpretation as a resolution metric might be non-standard.
-                # Let's use `frc.frc` and plot the curve.
-
-                # Ensure images are float and in the expected range for FRC library (e.g., 0-1 or 0-255)
-                # Assuming ToTensor gives 0-1, let's keep it that way.
-                # sr_np = sr_np.astype(np.float32)
-                # hr_np = hr_np.astype(np.float32)
-
-                # Ensure images are the same size (already checked above)
-                # Ensure images are square for standard FRC implementation
-                # size = min(sr_np.shape[0], sr_np.shape[1])
-                # sr_square = sr_np[:size, :size]
-                # hr_square = hr_np[:size, :size]
-
-                # Apply windowing (optional but common)
-                # sr_windowed = frc.util.apply_tukey(sr_square)
-                # hr_windowed = frc.util.apply_tukey(hr_square)
-
-                # Calculate FRC curve
-                # The frc.frc function expects two images
-                # frc_curve = frc.frc(sr_windowed, hr_windowed)
-                # frc_curves.append(frc_curve)
-
-                # Plot FRC curve for this sample
-                # plt.figure()
-                # img_size = size # Use the size of the square image
-                # xs_pix = np.arange(len(frc_curve)) / img_size
-                # plt.plot(xs_pix, frc_curve)
-                # plt.xlabel('Spatial Frequency (cycles/pixel)')
-                # plt.ylabel('FRC')
-                # plt.title(f'FRC Curve for Sample {i+1}')
-                # frc_plot_path = os.path.join(output_dir, f'sample_{idx}_frc_curve.png')
-                # plt.savefig(frc_plot_path)
-                # plt.close()
-                # print(f"Saved FRC plot for sample {idx} to {frc_plot_path}")
-
-            # except Exception as e:
-                # print(f"Could not calculate FRC for sample {idx}: {e}")
-                # Optionally save the SR and HR images for debugging
-                # transforms.ToPILImage()((sr_output_tensor.squeeze(0).cpu())).save(os.path.join(output_dir, f'sample_{idx}_sr_error.png'))
-                # transforms.ToPILImage()((hr_image_tensor.squeeze(0).cpu())).save(os.path.join(output_dir, f'sample_{idx}_hr_error.png'))
-
     # Report average metrics
     if psnr_values:
         avg_psnr = np.mean(psnr_values)
@@ -338,11 +270,9 @@ def evaluate_dataset_subset(
         avg_ssim = np.mean(ssim_values)
         print(f"Average SSIM over {len(ssim_values)} samples: {avg_ssim:.4f}")
 
-    # Note: Averaging FRC curves is not standard. We saved individual plots.
     print(f"Evaluation complete. Results saved to {output_dir}")
 
     # Return calculated metrics
-    # 移除FRC曲线返回
     return avg_psnr if psnr_values else None, avg_ssim if ssim_values else None
 
 

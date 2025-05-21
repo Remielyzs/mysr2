@@ -314,7 +314,7 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
 
                 # 将灰度张量转换为PIL图像 (需要确保数据范围在0-1或0-255)
                 # 假设边缘特征是0-1范围的浮点数
-                edge_pil = transforms.ToPILImage()('L')(edge_features_mean.squeeze(0))
+                edge_pil = transforms.ToPILImage(mode='L')(edge_features_mean.squeeze(0))
                 edge_sample_path = os.path.join(images_dir, f"sample_edge_features_{timestamp}.png")
                 edge_pil.save(edge_sample_path)
                 print(f"Sample edge features image saved to {edge_sample_path}")

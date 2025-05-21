@@ -26,8 +26,8 @@ VAL_HR_DIR = './data/DIV2K/DIV2K_valid_HR'
 
 BASE_TRAIN_PARAMS = {
     'model_class': SimpleSRCNN,
-    'epochs': 2, # Reduced epochs for faster testing
-    'batch_size': 32,
+    'epochs': 1, # Reduced epochs for faster testing
+    'batch_size': 128,
     'learning_rate': 0.001,
     'lr_data_dir': TRAIN_LR_DIR,
     'hr_data_dir': TRAIN_HR_DIR,
