@@ -13,12 +13,14 @@ import torch.nn as nn # 引入nn以支持更灵活的模型定义
 from models.simple_srcnn import SimpleSRCNN # 默认模型
 from models.basic_sr import BasicSRModel # 导入BasicSRModel
 from data_utils import SRDataset, generate_synthetic_data
+from evaluate import evaluate_dataset_subset # 导入评估函数
 
 # 允许在这里定义或导入其他模型
 # from other_models import AnotherSRModel # 示例
 
 def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/lr', hr_data_dir='./data/hr', epochs=10, batch_size=64, learning_rate=0.001, use_text_descriptions=False, criterion=None, results_base_dir='results', resume_checkpoint=None, model_name='model', edge_detection_methods=None, device='cpu', lr_patch_size=None, upscale_factor=None, edge_data_dir=None, val_lr_data_dir=None, val_hr_data_dir=None, image_size=None):
     """Trains the Super-Resolution model with checkpointing and flexible loss."""
+    print(f"Using device: {device}")
     """Trains the Super-Resolution model."""
     # Ensure data exists
     # lr_dir and hr_dir are now direct parameters
@@ -230,10 +232,24 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     torch.save(model.state_dict(), final_model_path)
     print(f"Final model saved to {final_model_path}")
 
-    # --- 生成报告 ---
-    report_path = os.path.join(run_specific_results_dir, f"report_{model_name}_{timestamp}.md")
-    
-    # --- 生成报告 ---
+    # --- 评估模型并生成报告 ---
+    print("\n--- Evaluating model on validation set ---")
+    # Pass the trained model instance and relevant parameters to the evaluation function
+    # Ensure the model is on the correct device for evaluation
+    model.to(device)
+    avg_psnr, avg_ssim, frc_curves = evaluate_dataset_subset(
+        model_class=model_class,
+        model_params=model_params, # Pass the same parameters used for training
+        model_path=final_model_path, # Use the final trained model
+        val_lr_data_dir=val_lr_data_dir,
+        val_hr_data_dir=val_hr_data_dir,
+        edge_detection_methods=edge_detection_methods,
+        num_samples=10, # Evaluate on a subset of validation data
+        output_dir=os.path.join(run_specific_results_dir, 'evaluation_metrics'), # Save evaluation results in a subdirectory
+        device=device,
+        upscale_factor=upscale_factor
+    )
+
     report_path = os.path.join(run_specific_results_dir, f"report_{model_name}_{timestamp}.md")
 
     # 1. 绘制Loss曲线图
@@ -324,6 +340,19 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     report_content += f"- Best Loss: {best_loss:.4f}\n"
     report_content += f"- Final Model Path: `{os.path.relpath(final_model_path, results_base_dir)}`\n"
     report_content += f"- Best Model Path: `{os.path.relpath(best_model_path, results_base_dir) if os.path.exists(best_model_to_load_path) else 'N/A'}`\n\n"
+    
+    # Add evaluation metrics to the report
+    report_content += f"## Evaluation Metrics\n"
+    if avg_psnr is not None:
+        report_content += f"- Average PSNR on Validation Set: {avg_psnr:.4f}\n"
+    if avg_ssim is not None:
+        report_content += f"- Average SSIM on Validation Set: {avg_ssim:.4f}\n"
+    if frc_curves:
+        report_content += f"- FRC Curves for {len(frc_curves)} samples saved in `./evaluation_metrics` directory.\n"
+    else:
+        report_content += f"- Evaluation metrics could not be calculated.\n"
+    report_content += f"\n"
+
     report_content += f"### Loss Curve\n"
     report_content += f"![Loss Curve](./images/{os.path.basename(loss_curve_path)})\n\n"
     report_content += f"### Sample Result\n"

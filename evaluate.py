@@ -72,7 +72,7 @@ def evaluate_image(model_class=SimpleSRCNN, model_params=None, model_path='simpl
         ssim_value = ssim_metric(output_tensor, hr_tensor)
         frc_metric = frc.FRC()
         frc_value = frc_metric(output_tensor, hr_tensor)
-        print(f"FRC: {frc_value.item():.4f}")
+        report_content = ""  # Initialize report content
         report_content += f"- PSNR: {psnr_value.item():.4f}\n"
         report_content += f"- SSIM: {ssim_value.item():.4f}\n"
         report_content += f"- FRC: {frc_value.item():.4f}\n"
@@ -318,6 +318,9 @@ def evaluate_dataset_subset(
     # Note: Averaging FRC curves is not standard. We saved individual plots.
     print(f"Evaluation complete. Results saved to {output_dir}")
 
+    # Return calculated metrics
+    return avg_psnr if psnr_values else None, avg_ssim if ssim_values else None, frc_curves
+
 
 if __name__ == '__main__':
     # Example usage:
@@ -376,8 +379,8 @@ if __name__ == '__main__':
     # 确保你有一个训练好的模型文件，例如 simple_srcnn.pth
     evaluate_dataset_subset(
         model_path='simple_srcnn.pth', # 替换为你的模型路径
-        lr_data_dir='./data/val/lr', # 替换为你的验证LR数据目录
-        hr_data_dir='./data/val/hr', # 替换为你的验证HR数据目录
+        val_lr_data_dir='./data/val/lr', # 替换为你的验证LR数据目录
+        val_hr_data_dir='./data/val/hr', # 替换为你的验证HR数据目录
         edge_detection_methods=['sobel'], # 示例：使用Sobel边缘
         num_samples=10, # 评估10张随机图片
         output_dir='./evaluation_results_subset',

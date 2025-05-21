@@ -26,8 +26,8 @@ VAL_HR_DIR = '/home/remiel/project/mysr2/data/DIV2K/DIV2K_valid_HR'
 
 BASE_TRAIN_PARAMS = {
     'model_class': SimpleSRCNN,
-    'epochs': 5, # Reduced epochs for faster testing
-    'batch_size': 16,
+    'epochs': 2, # Reduced epochs for faster testing
+    'batch_size': 32,
     'learning_rate': 0.001,
     'lr_data_dir': TRAIN_LR_DIR,
     'hr_data_dir': TRAIN_HR_DIR,
