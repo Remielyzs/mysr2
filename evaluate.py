@@ -70,7 +70,13 @@ def evaluate_image(model_class=SimpleSRCNN, model_params=None, model_path='simpl
         # torchmetrics expects inputs in range [0,1] if not specified otherwise for ssim
         psnr_value = psnr_metric(output_tensor, hr_tensor)
         ssim_value = ssim_metric(output_tensor, hr_tensor)
-        
+        frc_metric = frc.FRC()
+        frc_value = frc_metric(output_tensor, hr_tensor)
+        print(f"FRC: {frc_value.item():.4f}")
+        report_content += f"- PSNR: {psnr_value.item():.4f}\n"
+        report_content += f"- SSIM: {ssim_value.item():.4f}\n"
+        report_content += f"- FRC: {frc_value.item():.4f}\n"
+
         print(f"PSNR: {psnr_value.item():.4f}")
         print(f"SSIM: {ssim_value.item():.4f}")
     elif hr_image_path:
