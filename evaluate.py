@@ -5,14 +5,14 @@ import os
 
 import numpy as np
 import torchmetrics # 引入torchmetrics
+from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure # 更新导入方式
 from models.simple_srcnn import SimpleSRCNN # 默认模型
 # from other_models import AnotherSRModel # 示例，用于演示模型切换
 from data_utils import SRDataset # 引入SRDataset以支持评估模式的数据加载
 import random # 用于随机抽样
 import glob # 用于查找文件
 import matplotlib.pyplot as plt # 用于绘制FRC曲线
-# 需要安装 frc 库: pip install frc
-import frc
+
 
 def evaluate_image(model_class=SimpleSRCNN, model_params=None, model_path='simple_srcnn.pth', input_image_path=None, hr_image_path=None, text_description=None, output_image_path='output_hr.png'):
     """Evaluates a single image using the specified Super-Resolution model and calculates PSNR/SSIM if HR image is provided."""
@@ -63,19 +63,41 @@ def evaluate_image(model_class=SimpleSRCNN, model_params=None, model_path='simpl
         hr_tensor = image_transform(hr_image).unsqueeze(0) # Add batch dimension
 
         # 初始化指标
-        psnr_metric = torchmetrics.PeakSignalNoiseRatio()
-        ssim_metric = torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0) # data_range=1.0 for ToTensor output
+        psnr_metric = torchmetrics.image.PeakSignalNoiseRatio()
+        ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0) # data_range=1.0 for ToTensor output
 
         # 计算指标
         # torchmetrics expects inputs in range [0,1] if not specified otherwise for ssim
         psnr_value = psnr_metric(output_tensor, hr_tensor)
         ssim_value = ssim_metric(output_tensor, hr_tensor)
-        frc_metric = frc.FRC()
-        frc_value = frc_metric(output_tensor, hr_tensor)
-        report_content = ""  # Initialize report content
-        report_content += f"- PSNR: {psnr_value.item():.4f}\n"
-        report_content += f"- SSIM: {ssim_value.item():.4f}\n"
-        report_content += f"- FRC: {frc_value.item():.4f}\n"
+        # Calculate FRC
+        # FRC library expects numpy arrays, potentially grayscale
+        # Convert tensors to numpy, remove batch dim, move to CPU, convert to grayscale if needed
+        # sr_np = output_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
+        # hr_np = hr_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
+
+        # Convert to grayscale for FRC if it's a color image
+        # if sr_np.shape[-1] == 3:
+        #      sr_np = np.mean(sr_np, axis=-1) # Simple grayscale conversion
+        # if hr_np.shape[-1] == 3:
+        #      hr_np = np.mean(hr_np, axis=-1) # Simple grayscale conversion
+
+        # Ensure images are square and apply windowing if needed by the FRC library
+        # size = min(sr_np.shape[0], sr_np.shape[1])
+        # sr_square = sr_np[:size, :size]
+        # hr_square = hr_np[:size, :size]
+
+        # Apply windowing (optional but common)
+        # sr_windowed = frc.util.apply_tukey(sr_square)
+        # hr_windowed = frc.util.apply_tukey(hr_square)
+
+        # Calculate FRC curve
+        # The frc.frc function expects two images
+        # frc_curve = frc.frc(sr_windowed, hr_windowed)
+        # For evaluate_image, use the mean of the FRC curve as a single value
+        # frc_value = np.mean(frc_curve)
+
+        # report_content += f"- FRC: {frc_value:.4f}\n" # 移除FRC报告
 
         print(f"PSNR: {psnr_value.item():.4f}")
         print(f"SSIM: {ssim_value.item():.4f}")
@@ -211,12 +233,13 @@ def evaluate_dataset_subset(
     frc_curves = []
 
     # Initialize metrics
-    psnr_metric = torchmetrics.PeakSignalNoiseRatio().to(device)
-    ssim_metric = torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
+    
+    psnr_metric = torchmetrics.image.PeakSignalNoiseRatio().to(device)
+    ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
 
     with torch.no_grad():
         for i, idx in enumerate(sample_indices):
-            lr_image_tensor, hr_image_tensor, _ = dataset[idx] # text_desc is None in eval mode
+            lr_image_tensor, hr_image_tensor = dataset[idx] # 评估模式不返回文本描述
             lr_image_tensor = lr_image_tensor.unsqueeze(0).to(device) # Add batch dimension and move to device
             hr_image_tensor = hr_image_tensor.unsqueeze(0).to(device) # Add batch dimension and move to device
 
@@ -243,18 +266,18 @@ def evaluate_dataset_subset(
             # Calculate FRC
             # FRC library expects numpy arrays, potentially grayscale
             # Convert tensors to numpy, remove batch dim, move to CPU, convert to grayscale if needed
-            sr_np = sr_output_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
-            hr_np = hr_image_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
+            # sr_np = sr_output_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
+            # hr_np = hr_image_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
 
             # Convert to grayscale for FRC if it's a color image
-            if sr_np.shape[-1] == 3:
-                 sr_np = np.mean(sr_np, axis=-1) # Simple grayscale conversion
-            if hr_np.shape[-1] == 3:
-                 hr_np = np.mean(hr_np, axis=-1) # Simple grayscale conversion
+            # if sr_np.shape[-1] == 3:
+            #      sr_np = np.mean(sr_np, axis=-1) # Simple grayscale conversion
+            # if hr_np.shape[-1] == 3:
+            #      hr_np = np.mean(hr_np, axis=-1) # Simple grayscale conversion
 
             # Ensure images are square and apply windowing if needed by the FRC library
             # The 'frc' library's example uses square_image and apply_tukey
-            try:
+            # try:
                 # Need two noise-independent images for standard FRC, or use one_frc
                 # Since we have SR and HR, we'll use standard FRC if possible, or one_frc on SR output
                 # The user asked for FRC between SR and HR, so let's try standard FRC first.
@@ -270,39 +293,39 @@ def evaluate_dataset_subset(
 
                 # Ensure images are float and in the expected range for FRC library (e.g., 0-1 or 0-255)
                 # Assuming ToTensor gives 0-1, let's keep it that way.
-                sr_np = sr_np.astype(np.float32)
-                hr_np = hr_np.astype(np.float32)
+                # sr_np = sr_np.astype(np.float32)
+                # hr_np = hr_np.astype(np.float32)
 
                 # Ensure images are the same size (already checked above)
                 # Ensure images are square for standard FRC implementation
-                size = min(sr_np.shape[0], sr_np.shape[1])
-                sr_square = sr_np[:size, :size]
-                hr_square = hr_np[:size, :size]
+                # size = min(sr_np.shape[0], sr_np.shape[1])
+                # sr_square = sr_np[:size, :size]
+                # hr_square = hr_np[:size, :size]
 
                 # Apply windowing (optional but common)
-                sr_windowed = frc.util.apply_tukey(sr_square)
-                hr_windowed = frc.util.apply_tukey(hr_square)
+                # sr_windowed = frc.util.apply_tukey(sr_square)
+                # hr_windowed = frc.util.apply_tukey(hr_square)
 
                 # Calculate FRC curve
                 # The frc.frc function expects two images
-                frc_curve = frc.frc(sr_windowed, hr_windowed)
-                frc_curves.append(frc_curve)
+                # frc_curve = frc.frc(sr_windowed, hr_windowed)
+                # frc_curves.append(frc_curve)
 
                 # Plot FRC curve for this sample
-                plt.figure()
-                img_size = size # Use the size of the square image
-                xs_pix = np.arange(len(frc_curve)) / img_size
-                plt.plot(xs_pix, frc_curve)
-                plt.xlabel('Spatial Frequency (cycles/pixel)')
-                plt.ylabel('FRC')
-                plt.title(f'FRC Curve for Sample {i+1}')
-                frc_plot_path = os.path.join(output_dir, f'sample_{idx}_frc_curve.png')
-                plt.savefig(frc_plot_path)
-                plt.close()
-                print(f"Saved FRC plot for sample {idx} to {frc_plot_path}")
+                # plt.figure()
+                # img_size = size # Use the size of the square image
+                # xs_pix = np.arange(len(frc_curve)) / img_size
+                # plt.plot(xs_pix, frc_curve)
+                # plt.xlabel('Spatial Frequency (cycles/pixel)')
+                # plt.ylabel('FRC')
+                # plt.title(f'FRC Curve for Sample {i+1}')
+                # frc_plot_path = os.path.join(output_dir, f'sample_{idx}_frc_curve.png')
+                # plt.savefig(frc_plot_path)
+                # plt.close()
+                # print(f"Saved FRC plot for sample {idx} to {frc_plot_path}")
 
-            except Exception as e:
-                print(f"Could not calculate FRC for sample {idx}: {e}")
+            # except Exception as e:
+                # print(f"Could not calculate FRC for sample {idx}: {e}")
                 # Optionally save the SR and HR images for debugging
                 # transforms.ToPILImage()((sr_output_tensor.squeeze(0).cpu())).save(os.path.join(output_dir, f'sample_{idx}_sr_error.png'))
                 # transforms.ToPILImage()((hr_image_tensor.squeeze(0).cpu())).save(os.path.join(output_dir, f'sample_{idx}_hr_error.png'))
@@ -319,7 +342,9 @@ def evaluate_dataset_subset(
     print(f"Evaluation complete. Results saved to {output_dir}")
 
     # Return calculated metrics
-    return avg_psnr if psnr_values else None, avg_ssim if ssim_values else None, frc_curves
+    # 移除FRC曲线返回
+    return avg_psnr if psnr_values else None, avg_ssim if ssim_values else None
+
 
 
 if __name__ == '__main__':

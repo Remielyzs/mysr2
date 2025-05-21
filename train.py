@@ -187,12 +187,9 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
             running_val_loss = 0.0
             with torch.no_grad():
                 for i, batch_data in enumerate(val_dataloader):
-                    # Conditionally unpack batch_data based on use_text_descriptions
-                    if use_text_descriptions:
-                        lr_images, hr_images, text_descs = batch_data
-                    else:
-                        lr_images, hr_images = batch_data
-                        text_descs = None # Ensure text_descs is None if not used
+                    # In evaluation mode, SRDataset only returns lr_images and hr_images
+                    lr_images, hr_images = batch_data
+                    text_descs = None # Ensure text_descs is None for evaluation
 
                     lr_images, hr_images = lr_images.to(device), hr_images.to(device)
 
@@ -237,7 +234,7 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     # Pass the trained model instance and relevant parameters to the evaluation function
     # Ensure the model is on the correct device for evaluation
     model.to(device)
-    avg_psnr, avg_ssim, frc_curves = evaluate_dataset_subset(
+    avg_psnr, avg_ssim = evaluate_dataset_subset(
         model_class=model_class,
         model_params=model_params, # Pass the same parameters used for training
         model_path=final_model_path, # Use the final trained model
@@ -267,15 +264,13 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     print(f"Loss curve saved to {loss_curve_path}")
 
     # 2. 生成最佳结果样图 (选择一个样本)
-    # 为了简单起见，我们从数据加载器中取一个样本进行可视化
-    # 注意：这可能不是训练中遇到过的“最佳”样本，而是训练结束时模型对某个样本的处理结果
-    # 更准确的做法是在验证集上评估并保存效果最好的图片，但这里简化处理
+        # 2. 生成最佳结果样图 (选择第一个样本)
     best_model_to_load_path = os.path.join(run_specific_results_dir, f"{model_name}_best.pth")
     if os.path.exists(best_model_to_load_path):
         model.load_state_dict(torch.load(best_model_to_load_path))
         model.eval()
-        
-        # 从dataloader获取一个样本，确保dataloader不是空的
+
+        # 从dataloader获取第一个样本，确保dataloader不是空的
         if len(dataloader) > 0:
             # Conditionally unpack sample_data based on use_text_descriptions
             sample_data = next(iter(dataloader))
@@ -283,22 +278,46 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
                 sample_lr_img_tensor, sample_hr_img_tensor, sample_text_desc = sample_data
             else:
                 sample_lr_img_tensor, sample_hr_img_tensor = sample_data
-                sample_text_desc = None # Ensure sample_text_desc is None if not used
+                sample_text_desc = None # Ensure text_descs is None if not used
 
             sample_lr_to_show = sample_lr_img_tensor[0:1] # 取第一个样本
             sample_hr_to_show = sample_hr_img_tensor[0:1]
 
             with torch.no_grad():
-                if use_text_descriptions and hasattr(model, 'forward') and 'text_input' in model.forward.__code__.co_varnames:
+                if use_text_descriptions and hasattr(model, 'forward') and 'text_input' in model.forward.__code__.co_varnames: # Check if model accepts text_input
                     sample_output_tensor = model(sample_lr_to_show.to(device), text_input=[sample_text_desc[0]] if isinstance(sample_text_desc, list) else [sample_text_desc])
                 else:
                     sample_output_tensor = model(sample_lr_to_show.to(device))
-            
+
             # 保存图像
-            # 输入LR图像 (可能包含边缘图，只取前3通道RGB)
-            lr_pil = transforms.ToPILImage()(sample_lr_to_show[0,:3].cpu().squeeze(0))
+            # 输入LR图像 (可能包含边缘图)
+            # 如果有边缘特征，将边缘特征叠加到LR图像旁边进行展示
+            lr_img_tensor_rgb = sample_lr_to_show[0,:3].cpu().squeeze(0) # 只取RGB通道
+            lr_pil = transforms.ToPILImage()(lr_img_tensor_rgb)
             lr_sample_path = os.path.join(images_dir, f"sample_lr_{timestamp}.png")
             lr_pil.save(lr_sample_path)
+
+            # 如果使用了边缘检测，保存边缘特征图
+            edge_sample_path = None
+            if edge_detection_methods and len(edge_detection_methods) > 0:
+                # 提取边缘特征通道 (从第4个通道开始)
+                edge_features_tensor = sample_lr_to_show[0, 3:].cpu().squeeze(0)
+                # 将多个边缘特征叠加显示 (例如，转换为灰度并叠加)
+                # 如果是多个通道，可以考虑求平均或直接堆叠可视化
+                # 这里简单地将所有边缘通道求平均，然后转换为灰度图可视化
+                if edge_features_tensor.ndim == 3: # C, H, W
+                    # 如果有多个边缘通道，求平均
+                    edge_features_mean = torch.mean(edge_features_tensor, dim=0, keepdim=True) # 1, H, W
+                else:
+                    # 如果只有一个边缘通道
+                    edge_features_mean = edge_features_tensor.unsqueeze(0) # 1, H, W
+
+                # 将灰度张量转换为PIL图像 (需要确保数据范围在0-1或0-255)
+                # 假设边缘特征是0-1范围的浮点数
+                edge_pil = transforms.ToPILImage()('L')(edge_features_mean.squeeze(0))
+                edge_sample_path = os.path.join(images_dir, f"sample_edge_features_{timestamp}.png")
+                edge_pil.save(edge_sample_path)
+                print(f"Sample edge features image saved to {edge_sample_path}")
 
             # 输出SR图像
             sr_pil = transforms.ToPILImage()(sample_output_tensor.cpu().squeeze(0))
@@ -312,10 +331,10 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
             print(f"Sample images (LR, SR, HR) saved in {images_dir}")
         else:
             print("Dataloader is empty, cannot generate sample images.")
-            lr_sample_path, sr_sample_path, hr_sample_path = None, None, None
+            lr_sample_path, sr_sample_path, hr_sample_path, edge_sample_path = None, None, None, None
     else:
         print(f"Best model not found at {best_model_to_load_path}, cannot generate sample images.")
-        lr_sample_path, sr_sample_path, hr_sample_path = None, None, None
+        lr_sample_path, sr_sample_path, hr_sample_path, edge_sample_path = None, None, None, None
 
     # 3. 编写报告内容
     report_content = f"# Training Report for {model_name}\n\n"
@@ -347,17 +366,19 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
         report_content += f"- Average PSNR on Validation Set: {avg_psnr:.4f}\n"
     if avg_ssim is not None:
         report_content += f"- Average SSIM on Validation Set: {avg_ssim:.4f}\n"
-    if frc_curves:
-        report_content += f"- FRC Curves for {len(frc_curves)} samples saved in `./evaluation_metrics` directory.\n"
-    else:
-        report_content += f"- Evaluation metrics could not be calculated.\n"
-    report_content += f"\n"
+    # if frc_curves:
+    #     report_content += f"- FRC Curves for {len(frc_curves)} samples saved in `./evaluation_metrics` directory.\n"
+    # else:
+    #     report_content += f"- Evaluation metrics could not be calculated.\n"
+    # report_content += f"\n"
 
     report_content += f"### Loss Curve\n"
     report_content += f"![Loss Curve](./images/{os.path.basename(loss_curve_path)})\n\n"
     report_content += f"### Sample Result\n"
     if lr_sample_path and sr_sample_path and hr_sample_path:
         report_content += f"- Input LR Image: ![LR Sample](./images/{os.path.basename(lr_sample_path)})\n"
+        if edge_sample_path:
+             report_content += f"- Input Edge Features: ![Edge Sample](./images/{os.path.basename(edge_sample_path)})\n"
         report_content += f"- Output SR Image: ![SR Sample](./images/{os.path.basename(sr_sample_path)})\n"
         report_content += f"- Ground Truth HR Image: ![HR Sample](./images/{os.path.basename(hr_sample_path)})\n"
     else:
