@@ -4,9 +4,9 @@ import shutil
 import re
 
 # 源目录，存放下载的zip文件
-SOURCE_DIR = '/home/remiel/project/mysr2/data_download_temp/'
+SOURCE_DIR = './data_download_temp/'
 # 目标目录，存放解压和整理后的数据
-TARGET_DIR_BASE = '/home/remiel/project/mysr2/data/DIV2K/'
+TARGET_DIR_BASE = './data/DIV2K/'
 
 # 创建目标目录如果它不存在
 if not os.path.exists(TARGET_DIR_BASE):
