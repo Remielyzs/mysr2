@@ -1,0 +1,19 @@
+# Ignore compiled Python files
+*.pyc
+__pycache__/
+
+# Ignore image files
+*.png
+
+# Ignore zip files
+*.zip
+
+# Ignore model checkpoints and saved models
+*.pth
+checkpoints/
+
+# Ignore results and temporary data directories
+results/
+results_edge_experiments/
+data_download_temp/
+data/
