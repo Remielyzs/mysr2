@@ -19,14 +19,14 @@ from preprocess_edges import preprocess_edge_data # Import the pre-processing fu
 # TRAIN_HR_DIR = '/home/remiel/project/mysr2/data/split_sample/train/hr'
 # VAL_LR_DIR = '/home/remiel/project/mysr2/data/split_sample/val/lr'
 # VAL_HR_DIR = '/home/remiel/project/mysr2/data/split_sample/val/hr'
-TRAIN_LR_DIR = '/home/remiel/project/mysr2/data/DIV2K/DIV2K_train_LR_bicubic/X2'
-TRAIN_HR_DIR = '/home/remiel/project/mysr2/data/DIV2K/DIV2K_train_HR'
-VAL_LR_DIR = '/home/remiel/project/mysr2/data/DIV2K/DIV2K_valid_LR_bicubic/X2'
-VAL_HR_DIR = '/home/remiel/project/mysr2/data/DIV2K/DIV2K_valid_HR'
+TRAIN_LR_DIR = './data/DIV2K/DIV2K_train_LR_bicubic/X2'
+TRAIN_HR_DIR = './data/DIV2K/DIV2K_train_HR'
+VAL_LR_DIR = './data/DIV2K/DIV2K_valid_LR_bicubic/X2'
+VAL_HR_DIR = './data/DIV2K/DIV2K_valid_HR'
 
 BASE_TRAIN_PARAMS = {
     'model_class': SimpleSRCNN,
-    'epochs': 2, # Reduced epochs for faster testing
+    'epochs': 10, # Reduced epochs for faster testing
     'batch_size': 32,
     'learning_rate': 0.001,
     'lr_data_dir': TRAIN_LR_DIR,
