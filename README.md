@@ -44,18 +44,30 @@
 
 ```
 mysr2/
+├── config/                   # 配置文件目录
+│   └── experiment_config.py  # 实验配置定义
 ├── data/                     # 存放训练和测试数据 (示例)
 │   ├── hr/                   # 高分辨率图像
 │   └── lr/                   # 低分辨率图像
 ├── data_utils.py             # 数据加载和预处理工具
+├── evaluate.py               # 模型评估脚本
+├── experiment/               # 实验管理目录
+│   └── experiment_runner.py  # 实验运行器
+├── losses.py                 # 损失函数定义
 ├── models/                   # 存放模型定义文件
 │   ├── __init__.py
-│   └── simple_srcnn.py       # SimpleSRCNN模型示例
-├── model.py                  # (此文件已移除，模型现在位于models/目录下)
+│   ├── simple_srcnn.py       # SimpleSRCNN模型
+│   ├── basic_sr.py           # 基础超分辨率模型
+│   └── ...                   # 其他模型定义
+├── trainers/                 # 训练器目录
+│   ├── base_trainer.py       # 基础训练器
+│   ├── sr_trainer.py         # 超分辨率训练器
+│   └── train_config.py       # 训练配置
 ├── train.py                  # 模型训练脚本
-├── evaluate.py               # 模型评估脚本
+├── train_controller.py       # 训练控制器
+├── utils/                    # 工具函数目录
+│   └── evaluation_utils.py   # 评估工具
 ├── requirements.txt          # Python依赖包
-├── simple_srcnn.pth          # 预训练模型权重 (示例)
 └── README.md                 # 项目说明文档
 ```
 
@@ -78,115 +90,134 @@ pip install -r requirements.txt
 
 ### 3. 模型训练
 
-运行训练脚本：
+项目现在使用实验配置和训练控制器来管理训练流程。运行训练脚本：
+
 ```bash
-python train.py
+python train_controller.py
 ```
 
-可以修改 `train.py` 中的 `train_model` 函数参数或 `if __name__ == '__main__':` 部分来调整训练配置，例如：
--   选择不同的模型 (`model_class`)
--   设置模型参数 (`model_params`)
--   指定数据目录 (`data_dir`)
--   调整训练周期 (`epochs`)、批大小 (`batch_size`)、学习率 (`learning_rate`)
--   启用文本描述 (`use_text_descriptions=True`)
+训练配置分为两个层次：
 
-训练过程中，模型检查点（包括模型权重、优化器状态、当前周期和损失）将保存在 `checkpoints/` 目录下（可配置）。例如，`checkpoints/model_name_epoch_X.pth` 和 `checkpoints/model_name_best.pth`。训练完成后，最终模型也会保存在此目录。
+1. **基础训练参数** (`config/experiment_config.py` 中的 `BASE_TRAIN_PARAMS`)：
+   - 模型类型和参数
+   - 训练周期、批大小、学习率等基本参数
+   - 数据目录配置
+   - 设备选择
+   - 检查点目录等
 
--   启用文本描述 (`use_text_descriptions=True`)
--   指定损失函数 (`criterion`)
--   配置检查点目录 (`checkpoint_dir`)
--   从特定检查点恢复训练 (`resume_checkpoint`)
--   为保存的模型和检查点指定名称 (`model_name`)
--   指定边缘检测方法 (`edge_detection_methods`)，例如 `['sobel']` 或 `['canny']`
+2. **实验配置** (`config/experiment_config.py` 中的 `TRAINING_RUNS`)：
+   - 实验名称
+   - 边缘检测方法
+   - 损失函数配置
+   - 其他实验特定参数
 
-训练过程中，训练损失和验证损失都会被记录，并在训练结束时绘制损失曲线图保存在结果目录中。
-
-#### 示例：使用自定义损失函数、边缘检测和检查点
+#### 配置示例
 
 ```python
-# 在 train.py 的 if __name__ == '__main__': 部分
-from losses import L1Loss, CombinedLoss, EdgeLoss # 假设这些在 losses.py 中定义
+# 在 config/experiment_config.py 中
+from losses import L1Loss, CombinedLoss, EdgeLoss
 import torch.nn as nn
 
-# 1. 使用L1损失函数进行训练，并将模型命名为 'srcnn_l1'
-# train_model(
-#     model_class=SimpleSRCNN, 
-#     epochs=5, 
-#     batch_size=4, 
-#     criterion=L1Loss(), 
-#     model_name='srcnn_l1',
-#     checkpoint_dir='my_custom_checkpoints'
-# )
-
-# 2. 假设第一次训练中断，现在从 'my_custom_checkpoints/srcnn_l1_epoch_3.pth' 恢复训练
-# train_model(
-#     model_class=SimpleSRCNN, 
-#     epochs=10, # 总共希望训练到10个epochs
-#     batch_size=4, 
-#     criterion=L1Loss(), 
-#     model_name='srcnn_l1', 
-#     resume_checkpoint='my_custom_checkpoints/srcnn_l1_epoch_3.pth',
-#     checkpoint_dir='my_custom_checkpoints'
-# )
-
-# 3. 使用组合损失函数 (MSE + 边缘损失) 并指定边缘检测方法
-# combined_loss = CombinedLoss([
-#     (nn.MSELoss(), 1.0), 
-#     (EdgeLoss(edge_detector_type='sobel'), 0.1) # 边缘损失权重为0.1
-# ])
-# train_model(
-#     model_class=SimpleSRCNN, 
-#     epochs=5, 
-#     batch_size=2,
-#     criterion=combined_loss,
-#     model_name='srcnn_mse_edge',
-#     checkpoint_dir='checkpoints_mse_edge',
-#     edge_detection_methods=['sobel'] # 指定使用Sobel边缘
-# )
+class ExperimentConfig:
+    # 基础训练参数
+    BASE_TRAIN_PARAMS = {
+        'model_class': SimpleSRCNN,
+        'epochs': 10,
+        'batch_size': 4,
+        'learning_rate': 0.001,
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        # ... 其他基本参数
+    }
+    
+    # 实验配置列表
+    TRAINING_RUNS = [
+        # 实验1：使用L1损失
+        {
+            'name': 'srcnn_l1',
+            'edge_methods': None,
+            'criterion': L1Loss()
+        },
+        # 实验2：使用边缘检测和组合损失
+        {
+            'name': 'srcnn_edge',
+            'edge_methods': ['sobel'],
+            'criterion': CombinedLoss([
+                (nn.MSELoss(), 1.0),
+                (EdgeLoss(edge_detector_type='sobel'), 0.1)
+            ])
+        }
+        # ... 可以添加更多实验配置
+    ]
 ```
 
-训练过程中，训练损失和验证损失都会被记录，并在训练结束时绘制损失曲线图保存在结果目录中。
+训练控制器会自动：
+1. 预处理所需的边缘检测数据
+2. 为每个实验创建独立的结果目录
+3. 保存检查点和训练日志
+4. 记录训练和验证损失
+5. 在训练结束时生成损失曲线图
+
+所有实验结果将保存在各自的目录中，便于后续比较和分析。
 
 ### 4. 模型评估
 
-运行评估脚本：
+项目提供了两种评估方式，都集成在 `evaluate.py` 中：
+
+1. **单张图片评估**：用于快速测试模型效果
+2. **数据集评估**：用于系统性评估模型性能
+
+#### 单张图片评估
+
 ```bash
-python evaluate.py
+python evaluate.py --mode single \
+    --model-path results/srcnn_l1/model_best.pth \
+    --input-image path/to/lr_image.png \
+    --hr-image path/to/hr_image.png \
+    --output-image output_sr.png
 ```
 
-`evaluate.py` 脚本提供了 `evaluate_image` 函数，用于对单张图片进行超分辨率处理并保存结果。如果提供了高分辨率（HR）图像路径，它还会计算 PSNR 和 SSIM 指标。
+主要参数说明：
+- `--model-path`：模型权重文件路径
+- `--input-image`：输入的低分辨率图像
+- `--hr-image`：参考的高分辨率图像（可选）
+- `--output-image`：超分辨率结果保存路径
+- `--text-description`：文本描述（如果模型支持）
+- `--edge-methods`：边缘检测方法（如果模型使用）
 
-此外，新增了 `evaluate_dataset_subset` 函数，用于对验证数据集中的随机子集进行评估，并计算 PSNR、SSIM 以及 FRC（频率相关性）。FRC 曲线图将为每个样本生成并保存。
+#### 数据集评估
 
-#### 示例：评估单张图片
-
-```python
-# 在 evaluate.py 的 if __name__ == '__main__': 部分
-evaluate_image(
-    model_path='simple_srcnn.pth', # 替换为你的模型路径
-    input_image_path='./path/to/your/lr_image.png', # 替换为你的低分辨率图片路径
-    hr_image_path='./path/to/your/hr_image.png', # 可选，替换为对应的高分辨率图片路径以计算指标
-    text_description='example description', # 可选，如果模型支持文本输入
-    output_image_path='./output_sr_image.png' # 输出保存路径
-)
+```bash
+python evaluate.py --mode dataset \
+    --model-path results/srcnn_edge/model_best.pth \
+    --val-lr-dir data/val/lr \
+    --val-hr-dir data/val/hr \
+    --edge-methods sobel \
+    --num-samples 10 \
+    --output-dir evaluation_results
 ```
 
-#### 示例：评估数据集子集
+主要参数说明：
+- `--val-lr-dir`：验证集低分辨率图像目录
+- `--val-hr-dir`：验证集高分辨率图像目录
+- `--num-samples`：评估样本数量
+- `--edge-methods`：边缘检测方法列表（多个方法用空格分隔）
+- `--output-dir`：评估结果保存目录
 
-```python
-# 在 evaluate.py 的 if __name__ == '__main__': 部分
-evaluate_dataset_subset(
-    model_path='simple_srcnn.pth', # 替换为你的模型路径
-    lr_data_dir='./data/val/lr', # 替换为你的验证LR数据目录
-    hr_data_dir='./data/val/hr', # 替换为你的验证HR数据目录
-    edge_detection_methods=['sobel'], # 可选，指定边缘检测方法，需与训练时一致
-    num_samples=10, # 评估10张随机图片
-    output_dir='./evaluation_results_subset', # 评估结果保存目录
-    upscale_factor=2 # 根据你的模型设置
-)
-```
+评估结果包括：
+1. 每个样本的PSNR和SSIM值
+2. 整体平均PSNR和SSIM
+3. 超分辨率结果图像
+4. 评估报告（包含配置信息和结果统计）
 
-可以修改 `evaluate.py` 中的函数参数或 `if __name__ == '__main__':` 部分来调整评估配置。
+#### 评估工具模块
+
+评估相关的核心功能已重构到 `utils/evaluation_utils.py` 中的 `EvaluationUtils` 类，提供：
+- 图像加载和预处理
+- 评估指标计算（PSNR、SSIM等）
+- 结果可视化和保存
+- 批量评估支持
+
+这种模块化设计使得评估流程更加清晰和可扩展，同时确保了评估方法的一致性。
 
 ## 关于处理不同尺寸的图像输入
 
