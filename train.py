@@ -426,90 +426,18 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     print(f"All results, models, and reports saved in: {run_specific_results_dir}")
 
 if __name__ == '__main__':
-    import argparse
-    import json # 用于解析model_params_json
-    import glob # 需要glob来辅助生成示例文本描述
-
-    parser = argparse.ArgumentParser(description='Train Super-Resolution Models')
-    parser.add_argument('--lr_data_dir', type=str, default='./data/lr', help='Directory for low-resolution images')
-    parser.add_argument('--hr_data_dir', type=str, default='./data/hr', help='Directory for high-resolution images')
-    parser.add_argument('--model_class_name', type=str, default='SimpleSRCNN', help='Name of the model class to use (e.g., SimpleSRCNN, BasicSRModel)')
-    parser.add_argument('--model_params_json', type=str, default='{}', help='JSON string of model parameters')
-    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=64, help='Training batch size')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
-    parser.add_argument('--use_text_descriptions', action='store_true', help='Whether to use text descriptions')
-    parser.add_argument('--criterion_name', type=str, default='MSELoss', help='Loss function name (e.g., MSELoss, L1Loss)')
-    parser.add_argument('--results_base_dir', type=str, default='results', help='Base directory to save results')
-    parser.add_argument('--resume_checkpoint', type=str, default=None, help='Path to checkpoint to resume training from')
-    parser.add_argument('--model_name', type=str, default='model', help='Name for the current training run and saved model files')
-    parser.add_argument('--edge_detection_methods', nargs='*', default=None, help='List of edge detection methods (e.g., sobel canny laplacian) or None for default in SRDataset')
-    parser.add_argument('--device', type=str, default='cpu', help='Device to use for training (e.g., cpu, cuda)')
-    parser.add_argument('--lr_patch_size', type=int, default=None, help='Size of the LR image patch (e.g., 64). If specified, images will be resized.')
-    parser.add_argument('--upscale_factor', type=int, default=None, help='Upscale factor for HR images when lr_patch_size is specified.')
-
-    args = parser.parse_args()
-
-    # Map model_class_name to actual class
-    model_classes = {
-        'SimpleSRCNN': SimpleSRCNN,
-        'BasicSRModel': BasicSRModel,
-        # 'AnotherSRModel': AnotherSRModel, # Add other models here if defined
-    }
-    model_class_to_use = model_classes.get(args.model_class_name)
-    if model_class_to_use is None:
-        raise ValueError(f"Unknown model class name: {args.model_class_name}. Available: {list(model_classes.keys())}")
-
-    # Parse model_params_json
-    try:
-        model_params_to_use = json.loads(args.model_params_json)
-    except json.JSONDecodeError:
-        raise ValueError(f"Invalid JSON string for model_params_json: {args.model_params_json}")
-
-    # Map criterion_name to actual loss function
-    loss_functions = {
-        'MSELoss': nn.MSELoss,
-        'L1Loss': nn.L1Loss,
-        # Add other loss functions here
-    }
-    criterion_to_use = loss_functions.get(args.criterion_name)
-    if criterion_to_use is None:
-        raise ValueError(f"Unknown criterion name: {args.criterion_name}. Available: {list(loss_functions.keys())}")
-    criterion_instance = criterion_to_use()
-
-    print(f"--- Starting training with command line arguments for {args.model_name} ---")
+    # 示例：使用基本配置进行训练
     train_model(
-        model_class=model_class_to_use,
-        model_params=model_params_to_use,
-        lr_data_dir=args.lr_data_dir,
-        hr_data_dir=args.hr_data_dir,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        use_text_descriptions=args.use_text_descriptions,
-        criterion=criterion_instance,
-        results_base_dir=args.results_base_dir,
-        resume_checkpoint=args.resume_checkpoint,
-        model_name=args.model_name,
-        edge_detection_methods=args.edge_detection_methods,
-        device=args.device,
-        lr_patch_size=args.lr_patch_size,
-        upscale_factor=args.upscale_factor
+        model_class=SimpleSRCNN,
+        epochs=5,
+        batch_size=32,
+        learning_rate=0.001,
+        lr_data_dir='./data/DIV2K/DIV2K_train_LR_bicubic/X2',
+        hr_data_dir='./data/DIV2K/DIV2K_train_HR',
+        val_lr_data_dir='./data/DIV2K/DIV2K_valid_LR_bicubic/X2',
+        val_hr_data_dir='./data/DIV2K/DIV2K_valid_HR',
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        upscale_factor=2,
+        lr_patch_size=48,
+        early_stopping_patience=5
     )
-
-    # Example usage (commented out as we are now using argparse):
-    # print("--- Training with default SimpleSRCNN and checkpointing ---")
-    # All example usages below are now handled by command-line arguments.
-    # You can run the script with --help to see all options.
-    # Example for DIV2K x2 training:
-    # python train.py --lr_data_dir ./data/DIV2K/DIV2K_train_LR_bicubic/X2 \
-    #                 --hr_data_dir ./data/DIV2K/DIV2K_train_HR \
-    #                 --model_class_name BasicSRModel \
-    #                 --model_params_json '{"upscale_factor": 2}' \
-    #                 --epochs 50 \
-    #                 --batch_size 16 \
-    #                 --learning_rate 0.0001 \
-    #                 --model_name div2k_x2_basicsr \
-    #                 --device cuda \
-    #                 --edge_detection_methods None # Or specify, e.g., sobel canny
-    pass # Keep the if __name__ == '__main__': block, but it's now driven by argparse
