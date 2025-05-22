@@ -17,8 +17,8 @@ class ExperimentConfig:
         # 基础训练参数
         self.BASE_TRAIN_PARAMS = {
             'model_class': SimpleSRCNN,
-            'epochs': 1,  # 用于快速测试的较小轮数
-            'batch_size': 512,
+            'epochs': 100,  # 用于快速测试的较小轮数
+            'batch_size': 256,
             'learning_rate': 0.001,
             'lr_data_dir': self.TRAIN_LR_DIR,
             'hr_data_dir': self.TRAIN_HR_DIR,
