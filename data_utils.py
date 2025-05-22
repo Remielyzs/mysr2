@@ -138,6 +138,7 @@ class SRDataset(torch.utils.data.Dataset):
 
         # Load HR image if available (only required for train mode or eval with metrics)
         hr_img = None
+        hr_tensor_pil = None # Initialize hr_tensor_pil
         if self.mode == 'train' or (self.mode == 'eval' and self.hr_image_paths):
              hr_img_path = self.hr_image_paths[idx]
              hr_img = self._load_image(hr_img_path)
@@ -228,7 +229,8 @@ class SRDataset(torch.utils.data.Dataset):
 
              # Apply transform (ToTensor) to full images
              lr_tensor_pil = self.transform(lr_img).to(self.device) if self.transform else transforms.ToTensor()(lr_img).to(self.device)
-             hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else None)
+             # If hr_img is None, set hr_tensor_pil to an empty tensor
+             hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else torch.empty(0).to(self.device))
 
              # Get text description for the image if available
              if self.text_descriptions:
@@ -237,7 +239,8 @@ class SRDataset(torch.utils.data.Dataset):
         else:
             # Default case (e.g., no patching/resizing specified)
             lr_tensor_pil = self.transform(lr_img).to(self.device) if self.transform else transforms.ToTensor()(lr_img).to(self.device)
-            hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else None)
+            # If hr_img is None, set hr_tensor_pil to an empty tensor
+            hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else torch.empty(0).to(self.device))
 
             # Get text description if available
             if self.text_descriptions:

@@ -8,6 +8,7 @@ import datetime
 import matplotlib.pyplot as plt
 from PIL import Image # 用于加载和保存图像样本
 import shutil # 用于复制文件
+from tqdm import tqdm # 导入tqdm用于进度条
 
 import torch.nn as nn # 引入nn以支持更灵活的模型定义
 from models.simple_srcnn import SimpleSRCNN # 默认模型
@@ -18,7 +19,7 @@ from evaluate import evaluate_dataset_subset # 导入评估函数
 # 允许在这里定义或导入其他模型
 # from other_models import AnotherSRModel # 示例
 
-def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/lr', hr_data_dir='./data/hr', epochs=10, batch_size=64, learning_rate=0.001, use_text_descriptions=False, criterion=None, results_base_dir='results', resume_checkpoint=None, model_name='model', edge_detection_methods=None, device='cpu', lr_patch_size=None, upscale_factor=None, edge_data_dir=None, val_lr_data_dir=None, val_hr_data_dir=None, image_size=None):
+def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/lr', hr_data_dir='./data/hr', epochs=10, batch_size=64, learning_rate=0.001, use_text_descriptions=False, criterion=None, results_base_dir='results', resume_checkpoint=None, model_name='model', edge_detection_methods=None, device='cpu', lr_patch_size=None, upscale_factor=None, edge_data_dir=None, val_lr_data_dir=None, val_hr_data_dir=None, image_size=None, early_stopping_patience=None, early_stopping_min_delta=0.0): # 添加early stopping参数
     """Trains the Super-Resolution model with checkpointing and flexible loss."""
     print(f"Using device: {device}")
     """Trains the Super-Resolution model."""
@@ -74,8 +75,10 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
 
     # Validation data loading
     # Assuming validation data is in a 'val' subdirectory within the data directories
-    val_lr_data_dir = lr_data_dir.replace('/lr', '/val/lr')
-    val_hr_data_dir = hr_data_dir.replace('/hr', '/val/hr')
+    if val_lr_data_dir is None:
+        val_lr_data_dir = lr_data_dir.replace('/lr', '/val/lr')
+    if val_hr_data_dir is None:
+        val_hr_data_dir = hr_data_dir.replace('/hr', '/val/hr')
 
     val_dataset = None
     val_dataloader = None
@@ -118,6 +121,8 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
 
     start_epoch = 0
     best_loss = float('inf')
+    epochs_no_improve = 0 # 用于early stopping
+    early_stop = False # 用于early stopping
     all_train_losses = [] # 用于记录每个epoch的训练loss
     all_val_losses = [] # 用于记录每个epoch的验证loss
 
@@ -152,7 +157,8 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
     for epoch in range(start_epoch, epochs):
         model.train()
         running_loss = 0.0
-        for i, batch_data in enumerate(dataloader):
+        # 使用tqdm包装dataloader以显示进度条
+        for i, batch_data in enumerate(tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")):
             # Conditionally unpack batch_data based on use_text_descriptions
             if use_text_descriptions:
                 lr_images, hr_images, text_descs = batch_data
@@ -181,12 +187,14 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
         print(f"Epoch {epoch+1}/{epochs}, Average Training Loss: {epoch_train_loss:.4f}")
 
         # --- Validation loop ---
+        # 使用tqdm包装val_dataloader以显示进度条
+
         epoch_val_loss = float('inf') # Default to infinity if no validation data
         if val_dataloader:
             model.eval()
             running_val_loss = 0.0
             with torch.no_grad():
-                for i, batch_data in enumerate(val_dataloader):
+                for i, batch_data in enumerate(tqdm(val_dataloader, desc=f"Validation {epoch+1}/{epochs}", unit="batch")):
                     # In evaluation mode, SRDataset only returns lr_images and hr_images
                     lr_images, hr_images = batch_data
                     text_descs = None # Ensure text_descs is None for evaluation
@@ -203,6 +211,24 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
             epoch_val_loss = running_val_loss / len(val_dataloader)
             all_val_losses.append(epoch_val_loss) # 记录验证loss
             print(f"Epoch {epoch+1}/{epochs}, Average Validation Loss: {epoch_val_loss:.4f}")
+
+            # --- Early Stopping Check ---
+            if early_stopping_patience is not None:
+                if epoch_val_loss < best_loss - early_stopping_min_delta:
+                    best_loss = epoch_val_loss
+                    epochs_no_improve = 0
+                    # Save the best model when improvement is seen
+                    best_model_path = os.path.join(run_specific_results_dir, f"{model_name}_best.pth")
+                    torch.save(model.state_dict(), best_model_path)
+                    print(f"Validation loss improved. New best model saved to {best_model_path}")
+                else:
+                    epochs_no_improve += 1
+                    print(f"Validation loss did not improve. Epochs with no improvement: {epochs_no_improve}")
+
+                if epochs_no_improve >= early_stopping_patience:
+                    print(f"Early stopping triggered after {early_stopping_patience} epochs with no improvement.")
+                    early_stop = True
+                    break # Exit validation loop
 
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f"{model_name}_epoch_{epoch+1}.pth")
@@ -222,6 +248,9 @@ def train_model(model_class=SimpleSRCNN, model_params=None, lr_data_dir='./data/
             best_model_path = os.path.join(run_specific_results_dir, f"{model_name}_best.pth")
             torch.save(model.state_dict(), best_model_path)
             print(f"New best model saved to {best_model_path} based on validation loss {best_loss:.4f}")
+
+        if early_stop:
+            break # Exit training loop
 
     print("Training complete.")
     # Save the final model to run_specific_results_dir root
