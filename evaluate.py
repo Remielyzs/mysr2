@@ -1,356 +1,226 @@
 import torch
-import torchvision.transforms as transforms
-from PIL import Image
 import os
-
 import numpy as np
-import torchmetrics # 引入torchmetrics
-from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure # 更新导入方式
-from models.simple_srcnn import SimpleSRCNN # 默认模型
-# from other_models import AnotherSRModel # 示例，用于演示模型切换
-from data_utils import SRDataset # 引入SRDataset以支持评估模式的数据加载
-import random # 用于随机抽样
-import glob # 用于查找文件
-import matplotlib.pyplot as plt # 用于绘制FRC曲线
+import random
+from typing import Optional, Tuple, Dict, Any
+from models.simple_srcnn import SimpleSRCNN
+from data_utils import SRDataset
+from utils.evaluation_utils import EvaluationUtils
 
-
-def evaluate_image(model_class=SimpleSRCNN, model_params=None, model_path='simple_srcnn.pth', input_image_path=None, hr_image_path=None, text_description=None, output_image_path='output_hr.png'):
-    """Evaluates a single image using the specified Super-Resolution model and calculates PSNR/SSIM if HR image is provided."""
-    """Evaluates a single image using the specified Super-Resolution model."""
+def evaluate_image(
+    model_class=SimpleSRCNN,
+    model_params: Optional[Dict[str, Any]] = None,
+    model_path: str = 'simple_srcnn.pth',
+    input_image_path: Optional[str] = None,
+    hr_image_path: Optional[str] = None,
+    text_description: Optional[str] = None,
+    output_image_path: str = 'output_hr.png',
+    device: str = 'cpu'
+) -> Optional[Tuple[float, float]]:
+    """评估单张图像的超分辨率效果
+    
+    Args:
+        model_class: 模型类
+        model_params: 模型参数字典
+        model_path: 模型权重文件路径
+        input_image_path: 输入低分辨率图像路径
+        hr_image_path: 高分辨率参考图像路径（可选）
+        text_description: 文本描述（可选）
+        output_image_path: 输出图像保存路径
+        device: 计算设备
+        
+    Returns:
+        如果提供了hr_image_path，返回(PSNR, SSIM)元组，否则返回None
+    """
+    # 参数检查
     if not os.path.exists(model_path):
         print(f"Error: Model file not found at {model_path}")
-        return
+        return None
 
     if not input_image_path or not os.path.exists(input_image_path):
         print(f"Error: Input image file not found at {input_image_path}")
-        return
+        return None
 
-    # Load the model
+    # 初始化评估工具
+    eval_utils = EvaluationUtils(device)
+    
+    # 加载模型
     if model_params is None:
         model_params = {}
-    model = model_class(**model_params) # 实例化模型
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-
-    # Load and preprocess the input image
-    input_image = Image.open(input_image_path).convert('RGB')
-    image_transform = transforms.ToTensor()
-    input_tensor = image_transform(input_image).unsqueeze(0) # Add batch dimension
-
-    # Perform super-resolution
-    print(f"Processing image: {input_image_path}")
-    if text_description:
-        print(f"With text description: {text_description}")
-    with torch.no_grad():
-        # 将图像和文本描述传递给模型
-        # 注意：当前SimpleSRCNN的forward方法虽然接收text_input，但未实际使用它进行计算
-        output_tensor = model(input_tensor, text_input=[text_description] if text_description else None)
-
-
-    # Postprocess and save the output image
-    output_image = transforms.ToPILImage()(output_tensor.squeeze(0))
-    output_image.save(output_image_path)
-    print(f"Super-resolved image saved to {output_image_path}")
-
-    if hr_image_path and os.path.exists(hr_image_path):
-        hr_image = Image.open(hr_image_path).convert('RGB')
-        # 确保HR图像和SR图像尺寸一致，如果SR模型改变了尺寸，HR图像可能需要对应调整大小
-        # 这里假设SR输出与HR目标尺寸一致
-        if output_image.size != hr_image.size:
-            print(f"Warning: SR image size {output_image.size} and HR image size {hr_image.size} mismatch. Resizing HR to SR size for metrics.")
-            hr_image = hr_image.resize(output_image.size, Image.BICUBIC)
-        
-        hr_tensor = image_transform(hr_image).unsqueeze(0) # Add batch dimension
-
-        # 初始化指标
-        psnr_metric = torchmetrics.image.PeakSignalNoiseRatio()
-        ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0) # data_range=1.0 for ToTensor output
-
-        # 计算指标
-        # torchmetrics expects inputs in range [0,1] if not specified otherwise for ssim
-        psnr_value = psnr_metric(output_tensor, hr_tensor)
-        ssim_value = ssim_metric(output_tensor, hr_tensor)
-        # Calculate FRC
-        # FRC library expects numpy arrays, potentially grayscale
-        # Convert tensors to numpy, remove batch dim, move to CPU, convert to grayscale if needed
-        # sr_np = output_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
-        # hr_np = hr_tensor.squeeze(0).cpu().permute(1, 2, 0).numpy() # C, H, W -> H, W, C
-
-        # Convert to grayscale for FRC if it's a color image
-        # if sr_np.shape[-1] == 3:
-        #      sr_np = np.mean(sr_np, axis=-1) # Simple grayscale conversion
-        # if hr_np.shape[-1] == 3:
-        #      hr_np = np.mean(hr_np, axis=-1) # Simple grayscale conversion
-
-        # Ensure images are square and apply windowing if needed by the FRC library
-        # size = min(sr_np.shape[0], sr_np.shape[1])
-        # sr_square = sr_np[:size, :size]
-        # hr_square = hr_np[:size, :size]
-
-        # Apply windowing (optional but common)
-        # sr_windowed = frc.util.apply_tukey(sr_square)
-        # hr_windowed = frc.util.apply_tukey(hr_square)
-
-        # Calculate FRC curve
-        # The frc.frc function expects two images
-        # frc_curve = frc.frc(sr_windowed, hr_windowed)
-        # For evaluate_image, use the mean of the FRC curve as a single value
-        # frc_value = np.mean(frc_curve)
-
-        # report_content += f"- FRC: {frc_value:.4f}\n" # 移除FRC报告
-
-        print(f"PSNR: {psnr_value.item():.4f}")
-        print(f"SSIM: {ssim_value.item():.4f}")
-    elif hr_image_path:
-        print(f"Warning: HR image path provided ({hr_image_path}) but file not found. Skipping metrics.")
-
-if __name__ == '__main__':
-    # Example usage:
-    # 确保模型已经训练并保存 (例如，通过运行 train.py)
-    # python train.py
-
-    # 创建一个示例低分辨率图像用于评估
-    example_lr_dir = './data_example_eval/lr'
-    os.makedirs(example_lr_dir, exist_ok=True)
-    dummy_lr_path = os.path.join(example_lr_dir, 'eval_lr_dummy.png')
-    dummy_hr_size = 64
-    dummy_lr_size = 32
-    dummy_hr_img_np = np.random.randint(0, 256, (dummy_hr_size, dummy_hr_size, 3), dtype=np.uint8)
-    dummy_hr_img = Image.fromarray(dummy_hr_img_np, 'RGB')
-    dummy_lr_img = dummy_hr_img.resize((dummy_lr_size, dummy_lr_size), Image.BICUBIC)
-    dummy_lr_img.save(dummy_lr_path)
-    print(f"Created dummy LR image for evaluation at {dummy_lr_path}")
-
-    # 示例文本描述
-    example_text = "magnification: 2x, content: test image"
-
-    # 评估这个图像 (使用默认的SimpleSRCNN模型)
-    print("\n--- Evaluating with default SimpleSRCNN ---")
-    evaluate_image(
-        model_path='simple_srcnn.pth', # 确保这个模型文件存在
-        input_image_path=dummy_lr_path,
-        text_description=example_text,
-        output_image_path='./dummy_output_hr_eval.png'
-    )
-
-    # 示例：如何使用不同的模型进行评估 (假设 AnotherSRModel 已定义并训练保存为 another_model.pth)
-    # class AnotherSRModel(torch.nn.Module): # 简单定义以便运行
-    #     def __init__(self, custom_param=128):
-    #         super().__init__()
-    #         self.conv = torch.nn.Conv2d(3,3,3,1,1)
-    #         self.upsample = torch.nn.ConvTranspose2d(3, 3, kernel_size=4, stride=2, padding=1)
-    #     def forward(self, x, text_input=None):
-    #         x = self.conv(x)
-    #         x = self.upsample(x)
-    #         return x
-    # # 假设你已经训练并保存了 AnotherSRModel 的权重到 'another_model.pth'
-    # # torch.save(AnotherSRModel().state_dict(), 'another_model.pth') 
-    # print("\n--- Evaluating with AnotherSRModel (example) ---")
-    # evaluate_image(
-    #     model_class=AnotherSRModel,
-    #     model_params={'custom_param': 256},
-    #     model_path='another_model.pth', # 需要确保此文件存在
-    #     input_image_path=dummy_lr_path,
-    #     text_description="another model test",
-    #     output_image_path='./dummy_output_hr_another_model.png'
-    # )
-
-    # 清理示例文件
-    # if os.path.exists(dummy_lr_path):
-    #     os.remove(dummy_lr_path)
-    # if os.path.exists('./dummy_output_hr_eval.png'):
-    #     os.remove('./dummy_output_hr_eval.png')
-    # if os.path.exists('./dummy_output_hr_another_model.png'):
-    #     os.remove('./dummy_output_hr_another_model.png')
-    # import shutil
-    # if os.path.exists('./data_example_eval'):
-    # shutil.rmtree('./data_example_eval')
-    print("\nEvaluation example complete. Check for output images.")
-
-def evaluate_dataset_subset(
-    model_class=SimpleSRCNN,
-    model_params=None,
-    model_path='simple_srcnn.pth',
-    val_lr_data_dir='./data/split_sample/val/lr', # Use new parameter name
-    val_hr_data_dir='./data/split_sample/val/hr', # Use new parameter name
-    edge_detection_methods=None,
-    num_samples=10,
-    output_dir='./evaluation_results',
-    device='cpu',
-    upscale_factor=2 # Assuming a default upscale factor
-):
-    """Evaluates a random subset of images from a dataset using the specified model and calculates metrics including FRC."""
-
-    if not os.path.exists(model_path):
-        print(f"Error: Model file not found at {model_path}")
-        return
-
-    # Check for validation data directories
-    if not os.path.exists(val_lr_data_dir) or not os.path.exists(val_hr_data_dir):
-        print(f"Error: Validation data directories not found at {val_lr_data_dir} or {val_hr_data_dir}")
-        return
-
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Load the model
-    if model_params is None:
-        model_params = {}
-
-    # Determine number of input channels for the model (similar logic as in train.py)
-    num_edge_channels = len(edge_detection_methods) if edge_detection_methods else 0 # 0 if None, as SRDataset handles this
-    # Assuming original image is RGB (3 channels)
-    in_channels_for_model = 3 + num_edge_channels
-
-    # Add in_channels and upscale_factor to model_params if the model is BasicSRModel or similar that accepts it
-    # This part might need adjustment based on the actual model classes used
-    if hasattr(model_class, '__init__') and 'in_channels' in model_class.__init__.__code__.co_varnames:
-         model_params['in_channels'] = in_channels_for_model
-    if hasattr(model_class, '__init__') and 'upscale_factor' in model_class.__init__.__code__.co_varnames:
-         model_params['upscale_factor'] = upscale_factor
-
     model = model_class(**model_params)
     model.load_state_dict(torch.load(model_path))
     model.to(device)
     model.eval()
 
-    # Data loading
-    image_transform = transforms.ToTensor()
-    # Assuming text descriptions are not used for evaluation metrics calculation
-    # Pass the validation directories explicitly
-    dataset = SRDataset(lr_dir=None, hr_dir=None, text_descriptions=None, transform=image_transform, mode='eval', edge_methods=edge_detection_methods, device=device, upscale_factor=upscale_factor, val_lr_dir=val_lr_data_dir, val_hr_dir=val_hr_data_dir)
+    # 加载和预处理输入图像
+    input_tensor = eval_utils.load_and_preprocess_image(input_image_path)
+    if input_tensor is None:
+        return None
+
+    # 执行超分辨率
+    with torch.no_grad():
+        output_tensor = model(input_tensor, text_input=[text_description] if text_description else None)
+
+    # 保存输出图像
+    if not eval_utils.save_image(output_tensor, output_image_path):
+        print(f"Warning: Failed to save output image to {output_image_path}")
+
+    # 如果提供了HR图像，计算评估指标
+    if hr_image_path and os.path.exists(hr_image_path):
+        hr_tensor = eval_utils.load_and_preprocess_image(hr_image_path)
+        if hr_tensor is None:
+            return None
+            
+        try:
+            psnr, ssim = eval_utils.calculate_metrics(output_tensor, hr_tensor)
+            print(f"PSNR: {psnr:.4f}")
+            print(f"SSIM: {ssim:.4f}")
+            return psnr, ssim
+        except ValueError as e:
+            print(f"Error calculating metrics: {e}")
+            return None
+    return None
+
+def evaluate_dataset_subset(
+    model_class=SimpleSRCNN,
+    model_params: Optional[Dict[str, Any]] = None,
+    model_path: str = 'simple_srcnn.pth',
+    val_lr_data_dir: str = './data/split_sample/val/lr',
+    val_hr_data_dir: str = './data/split_sample/val/hr',
+    edge_detection_methods: Optional[list] = None,
+    num_samples: int = 10,
+    output_dir: str = './evaluation_results',
+    device: str = 'cpu',
+    upscale_factor: int = 2
+) -> Optional[Tuple[float, float]]:
+    """评估数据集子集的超分辨率效果
+    
+    Args:
+        model_class: 模型类
+        model_params: 模型参数字典
+        model_path: 模型权重文件路径
+        val_lr_data_dir: 验证集低分辨率图像目录
+        val_hr_data_dir: 验证集高分辨率图像目录
+        edge_detection_methods: 边缘检测方法列表
+        num_samples: 评估样本数量
+        output_dir: 输出目录
+        device: 计算设备
+        upscale_factor: 放大倍数
+        
+    Returns:
+        返回平均PSNR和SSIM值的元组，如果评估失败则返回None
+    """
+    # 参数检查
+    if not os.path.exists(model_path):
+        print(f"Error: Model file not found at {model_path}")
+        return None
+
+    if not os.path.exists(val_lr_data_dir) or not os.path.exists(val_hr_data_dir):
+        print(f"Error: Validation data directories not found at {val_lr_data_dir} or {val_hr_data_dir}")
+        return None
+
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 初始化评估工具
+    eval_utils = EvaluationUtils(device)
+
+    # 准备模型参数
+    if model_params is None:
+        model_params = {}
+    num_edge_channels = len(edge_detection_methods) if edge_detection_methods else 0
+    in_channels_for_model = 3 + num_edge_channels
+
+    # 更新模型参数
+    if hasattr(model_class, '__init__'):
+        if 'in_channels' in model_class.__init__.__code__.co_varnames:
+            model_params['in_channels'] = in_channels_for_model
+        if 'upscale_factor' in model_class.__init__.__code__.co_varnames:
+            model_params['upscale_factor'] = upscale_factor
+
+    # 加载模型
+    model = model_class(**model_params)
+    model.load_state_dict(torch.load(model_path))
+    model.to(device)
+    model.eval()
+
+    # 加载数据集
+    dataset = SRDataset(
+        lr_dir=None,
+        hr_dir=None,
+        text_descriptions=None,
+        transform=eval_utils.transform,
+        mode='eval',
+        edge_methods=edge_detection_methods,
+        device=device,
+        upscale_factor=upscale_factor,
+        val_lr_dir=val_lr_data_dir,
+        val_hr_dir=val_hr_data_dir
+    )
 
     if len(dataset) == 0:
         print("No images found in the dataset.")
-        return
+        return None
 
-    # Select random samples
+    # 随机选择样本
     sample_indices = random.sample(range(len(dataset)), min(num_samples, len(dataset)))
     print(f"Evaluating {len(sample_indices)} random samples.")
 
-    psnr_values = []
-    ssim_values = []
-
-    # Initialize metrics
-    
-    psnr_metric = torchmetrics.image.PeakSignalNoiseRatio().to(device)
-    ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
-
+    # 评估样本
+    metrics_list = []
     with torch.no_grad():
         for i, idx in enumerate(sample_indices):
-            lr_image_tensor, hr_image_tensor = dataset[idx] # 评估模式不返回文本描述
-            lr_image_tensor = lr_image_tensor.unsqueeze(0).to(device) # Add batch dimension and move to device
-            hr_image_tensor = hr_image_tensor.unsqueeze(0).to(device) # Add batch dimension and move to device
+            lr_image_tensor, hr_image_tensor = dataset[idx]
+            lr_image_tensor = lr_image_tensor.unsqueeze(0).to(device)
+            hr_image_tensor = hr_image_tensor.unsqueeze(0).to(device)
 
-            # Perform super-resolution
-            # Need to handle models that might expect text_input even if it's None
+            # 执行超分辨率
             if hasattr(model, 'forward') and 'text_input' in model.forward.__code__.co_varnames:
-                 sr_output_tensor = model(lr_image_tensor, text_input=None)
+                sr_output_tensor = model(lr_image_tensor, text_input=None)
             else:
-                 sr_output_tensor = model(lr_image_tensor)
+                sr_output_tensor = model(lr_image_tensor)
 
-            # Ensure SR output and HR target have the same size for metrics
-            # This might involve cropping or resizing the HR target if the model output size is fixed/different
-            # Assuming model output matches HR size for now based on typical SR setup
+            # 检查输出尺寸
             if sr_output_tensor.shape[-2:] != hr_image_tensor.shape[-2:]:
-                 print(f"Warning: Sample {i} SR output size {sr_output_tensor.shape[-2:]} and HR target size {hr_image_tensor.shape[-2:]} mismatch. Skipping metrics for this sample.")
-                 continue
+                print(f"Warning: Sample {i} SR output size {sr_output_tensor.shape[-2:]} and HR target size {hr_image_tensor.shape[-2:]} mismatch. Skipping metrics for this sample.")
+                continue
 
-            # Calculate PSNR and SSIM
-            psnr_value = psnr_metric(sr_output_tensor, hr_image_tensor)
-            ssim_value = ssim_metric(sr_output_tensor, hr_image_tensor)
-            psnr_values.append(psnr_value.item())
-            ssim_values.append(ssim_value.item())
+            try:
+                psnr, ssim = eval_utils.calculate_metrics(sr_output_tensor, hr_image_tensor)
+                metrics_list.append((psnr, ssim))
+            except ValueError as e:
+                print(f"Error calculating metrics for sample {i}: {e}")
 
-    # Report average metrics
-    if psnr_values:
-        avg_psnr = np.mean(psnr_values)
-        print(f"\nAverage PSNR over {len(psnr_values)} samples: {avg_psnr:.4f}")
-    if ssim_values:
-        avg_ssim = np.mean(ssim_values)
-        print(f"Average SSIM over {len(ssim_values)} samples: {avg_ssim:.4f}")
-
-    print(f"Evaluation complete. Results saved to {output_dir}")
-
-    # Return calculated metrics
-    return avg_psnr if psnr_values else None, avg_ssim if ssim_values else None
-
-
+    # 处理评估结果
+    results = eval_utils.process_batch_metrics(metrics_list)
+    if results['avg_psnr'] is not None:
+        print(f"\nAverage PSNR over {len(metrics_list)} samples: {results['avg_psnr']:.4f}")
+        print(f"Average SSIM over {len(metrics_list)} samples: {results['avg_ssim']:.4f}")
+        return results['avg_psnr'], results['avg_ssim']
+    return None
 
 if __name__ == '__main__':
-    # Example usage:
-    # 确保模型已经训练并保存 (例如，通过运行 train.py)
-    # python train.py
-
-    # 创建一个示例低分辨率图像用于评估
+    # 示例用法
     example_lr_dir = './data_example_eval/lr'
     os.makedirs(example_lr_dir, exist_ok=True)
     dummy_lr_path = os.path.join(example_lr_dir, 'eval_lr_dummy.png')
+    
+    # 创建示例图像
     dummy_hr_size = 64
     dummy_lr_size = 32
     dummy_hr_img_np = np.random.randint(0, 256, (dummy_hr_size, dummy_hr_size, 3), dtype=np.uint8)
-    dummy_hr_img = Image.fromarray(dummy_hr_img_np, 'RGB')
-    dummy_lr_img = dummy_hr_img.resize((dummy_lr_size, dummy_lr_size), Image.BICUBIC)
-    dummy_lr_img.save(dummy_lr_path)
-    print(f"Created dummy LR image for evaluation at {dummy_lr_path}")
-
-    # 示例文本描述
-    example_text = "magnification: 2x, content: test image"
-
-    # 评估这个图像 (使用默认的SimpleSRCNN模型)
+    
+    # 保存示例图像用于评估
+    eval_utils = EvaluationUtils()
+    dummy_tensor = torch.from_numpy(dummy_hr_img_np.transpose(2, 0, 1)).float() / 255.0
+    eval_utils.save_image(dummy_tensor.unsqueeze(0), dummy_lr_path)
+    
+    # 评估示例
     print("\n--- Evaluating with default SimpleSRCNN ---")
     evaluate_image(
-        model_path='simple_srcnn.pth', # 确保这个模型文件存在
+        model_path='simple_srcnn.pth',
         input_image_path=dummy_lr_path,
-        text_description=example_text,
+        text_description="magnification: 2x, content: test image",
         output_image_path='./dummy_output_hr_eval.png'
     )
-
-    # 示例：如何使用不同的模型进行评估 (假设 AnotherSRModel 已定义并训练保存为 another_model.pth)
-    # class AnotherSRModel(torch.nn.Module): # 简单定义以便运行
-    #     def __init__(self, custom_param=128):
-    #         super().__init__()
-    #         self.conv = torch.nn.Conv2d(3,3,3,1,1)
-    #         self.upsample = torch.nn.ConvTranspose2d(3, 3, kernel_size=4, stride=2, padding=1)
-    #     def forward(self, x, text_input=None):
-    #         x = self.conv(x)
-    #         x = self.upsample(x) # Assuming 2x upscale
-    #         return x
-    # # 假设你已经训练并保存了 AnotherSRModel 的权重到 'another_model.pth'
-    # # torch.save(AnotherSRModel().state_dict(), 'another_model.pth')
-    # print("\n--- Evaluating with AnotherSRModel (example) ---")
-    # evaluate_image(
-    #     model_class=AnotherSRModel,
-    #     model_params={'custom_param': 256},
-    #     model_path='another_model.pth', # 需要确保此文件存在
-    #     input_image_path=dummy_lr_path,
-    #     text_description="another model test",
-    #     output_image_path='./dummy_output_hr_another_model.png'
-    # )
-
-    # 示例：评估数据集子集
-    print("\n--- Evaluating dataset subset ---")
-    # 确保你有一个验证数据集在 ./data/val/lr 和 ./data/val/hr
-    # 确保你有一个训练好的模型文件，例如 simple_srcnn.pth
-    evaluate_dataset_subset(
-        model_path='simple_srcnn.pth', # 替换为你的模型路径
-        val_lr_data_dir='./data/val/lr', # 替换为你的验证LR数据目录
-        val_hr_data_dir='./data/val/hr', # 替换为你的验证HR数据目录
-        edge_detection_methods=['sobel'], # 示例：使用Sobel边缘
-        num_samples=10, # 评估10张随机图片
-        output_dir='./evaluation_results_subset',
-        upscale_factor=2 # 根据你的模型设置
-    )
-
-    # 清理示例文件
-    # if os.path.exists(dummy_lr_path):
-    #     os.remove(dummy_lr_path)
-    # if os.path.exists('./dummy_output_hr_eval.png'):
-    #     os.remove('./dummy_output_hr_eval.png')
-    # if os.path.exists('./dummy_output_hr_another_model.png'):
-    #     os.remove('./dummy_output_hr_another_model.png')
-    # import shutil
-    # if os.path.exists('./data_example_eval'):
-    #     shutil.rmtree('./data_example_eval')
-    # print("\nEvaluation example complete. Check for output images.")
 
