@@ -438,6 +438,53 @@ class ModelValidator:
         
         print(f"Results saved to {save_path}")
 
+def unified_model_evaluation(model_paths: List[str], val_dataset_path: str, model_names: List[str] = None, output_dir: str = './evaluation_results'):
+    """
+    统一验证多个模型在同一验证集上的性能
+    
+    Args:
+        model_paths: 多个模型的路径列表
+        val_dataset_path: 验证集路径
+        model_names: 模型名称列表，如果为None则使用模型文件名
+        output_dir: 输出结果保存目录
+        
+    Returns:
+        所有模型的验证结果列表
+    """
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 初始化验证器
+    validator = ModelValidator(val_dataset_path)
+    
+    # 验证所有模型
+    print("开始统一模型验证...")
+    results = validator.validate_multiple_models(model_paths, model_names)
+    
+    if results:
+        # 绘制指标对比图
+        print("绘制指标对比图...")
+        metrics_comparison_path = os.path.join(output_dir, "metrics_comparison.png")
+        validator.plot_metrics_comparison(results, metrics_comparison_path)
+        
+        # 可视化样本结果
+        print("可视化样本结果...")
+        sample_0_path = os.path.join(output_dir, "sample_0_comparison.png")
+        sample_1_path = os.path.join(output_dir, "sample_1_comparison.png")
+        validator.visualize_sample_results(results, sample_idx=0, save_path=sample_0_path)
+        validator.visualize_sample_results(results, sample_idx=1, save_path=sample_1_path)
+        
+        # 保存结果
+        print("保存结果...")
+        results_json_path = os.path.join(output_dir, "validation_results.json")
+        validator.save_results(results, results_json_path)
+        
+        print(f"验证完成！结果已保存到 {output_dir}")
+        return results
+    else:
+        print("未获得有效结果。")
+        return None
+
 # 使用示例
 def main():
     # 配置参数
@@ -448,31 +495,10 @@ def main():
         "/path/to/model3.pth"
     ]
     model_names = ["ESRGAN", "EDSR", "SwinIR"]
+    output_dir = "./evaluation_results"
     
-    # 创建验证器
-    validator = ModelValidator(val_dataset_path)
-    
-    # 验证所有模型
-    print("Starting model validation...")
-    results = validator.validate_multiple_models(model_paths, model_names)
-    
-    if results:
-        # 绘制指标对比图
-        print("Plotting metrics comparison...")
-        validator.plot_metrics_comparison(results, "metrics_comparison.png")
-        
-        # 可视化样本结果
-        print("Visualizing sample results...")
-        validator.visualize_sample_results(results, sample_idx=0, save_path="sample_0_comparison.png")
-        validator.visualize_sample_results(results, sample_idx=1, save_path="sample_1_comparison.png")
-        
-        # 保存结果
-        print("Saving results...")
-        validator.save_results(results, "validation_results.json")
-        
-        print("Validation completed!")
-    else:
-        print("No valid results obtained.")
+    # 调用统一验证函数
+    unified_model_evaluation(model_paths, val_dataset_path, model_names, output_dir)
 
 if __name__ == "__main__":
     main()
