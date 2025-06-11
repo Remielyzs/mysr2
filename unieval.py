@@ -14,39 +14,28 @@ import json
 from typing import List, Dict, Tuple, Any
 import seaborn as sns
 from pathlib import Path
+from models.simple_srcnn import SimpleSRCNN  # 导入SimpleSRCNN模型
 
-class SuperResolutionDataset(Dataset):
-    """超分辨率验证数据集"""
-    def __init__(self, val_path: str, transform=None):
-        self.val_path = val_path
-        self.transform = transform
-        self.lr_images = []
-        self.hr_images = []
-        
-        # 假设数据集结构: val_path/LR/ 和 val_path/HR/
-        lr_path = os.path.join(val_path, 'LR')
-        hr_path = os.path.join(val_path, 'HR')
-        
-        if os.path.exists(lr_path) and os.path.exists(hr_path):
-            lr_files = sorted(os.listdir(lr_path))
-            hr_files = sorted(os.listdir(hr_path))
-            
-            for lr_file, hr_file in zip(lr_files, hr_files):
-                self.lr_images.append(os.path.join(lr_path, lr_file))
-                self.hr_images.append(os.path.join(hr_path, hr_file))
-    
-    def __len__(self):
-        return len(self.lr_images)
-    
-    def __getitem__(self, idx):
-        lr_img = Image.open(self.lr_images[idx]).convert('RGB')
-        hr_img = Image.open(self.hr_images[idx]).convert('RGB')
-        
-        if self.transform:
-            lr_img = self.transform(lr_img)
-            hr_img = self.transform(hr_img)
-        
-        return lr_img, hr_img, idx
+from data_utils import SRDataset
+from config.experiment_config import ExperimentConfig # 导入ExperimentConfig
+
+class SuperResolutionDataset(SRDataset):
+    """超分辨率验证数据集，继承自SRDataset"""
+    def __init__(self, lr_path: str, hr_path: str, transform=None, edge_methods=None, device='cpu', lr_patch_size=None, upscale_factor=None, image_size=None):
+        # 调用父类的初始化方法，直接传递参数
+        super().__init__(
+            lr_dir=None,
+            hr_dir=None,
+            transform=transform,
+            mode='eval',
+            edge_methods=edge_methods,
+            device=device,
+            val_lr_dir=lr_path,
+            val_hr_dir=hr_path,
+            lr_patch_size=lr_patch_size,
+            upscale_factor=upscale_factor,
+            image_size=image_size
+        )
 
 class MetricsCalculator:
     """图像质量指标计算器"""
@@ -107,7 +96,7 @@ class EdgeSkeletonAnalyzer:
             edges = canny(gray, low_threshold=low, high_threshold=high)
         elif method == 'sobel':
             edges = filters.sobel(gray)
-        elif method == 'prewitt':
+        elif method == 'laplacian':
             edges = filters.prewitt(gray)
         else:
             raise ValueError(f"Unknown edge detection method: {method}")
@@ -163,38 +152,228 @@ class EdgeSkeletonAnalyzer:
 class ModelValidator:
     """模型验证器"""
     
-    def __init__(self, val_dataset_path: str):
-        self.val_dataset_path = val_dataset_path
+    def __init__(self, config: ExperimentConfig):
+        self.config = config
+        self.val_lr_path = config.VAL_LR_DIR
+        self.val_hr_path = config.VAL_HR_DIR
+        # 初始化时加载所有可能的边缘检测方法
+        self.all_edge_methods = ['canny', 'sobel', 'laplacian']
+        self.device = config.BASE_TRAIN_PARAMS.get('device', 'cpu')
+        self.lr_patch_size = config.BASE_TRAIN_PARAMS.get('lr_patch_size', None)
+        self.upscale_factor = config.BASE_TRAIN_PARAMS.get('upscale_factor', None)
+        self.image_size = config.BASE_TRAIN_PARAMS.get('image_size', None)
+        
         self.metrics_calc = MetricsCalculator()
         self.edge_analyzer = EdgeSkeletonAnalyzer()
         
-        # 加载验证数据集
+        # 加载验证数据集，使用所有边缘检测方法
         transform = transforms.Compose([
             transforms.ToTensor(),
         ])
-        self.dataset = SuperResolutionDataset(val_dataset_path, transform=transform)
+        self.dataset = SuperResolutionDataset(
+            lr_path=self.val_lr_path,
+            hr_path=self.val_hr_path,
+            transform=transform,
+            edge_methods=self.all_edge_methods,  # 使用所有边缘检测方法
+            device=self.device,
+            lr_patch_size=self.lr_patch_size,
+            upscale_factor=self.upscale_factor,
+            image_size=self.image_size
+        )
         self.dataloader = DataLoader(self.dataset, batch_size=1, shuffle=False)
+        
+        # 记录每个边缘检测方法对应的通道索引
+        self.edge_channel_indices = {}
+        start_idx = 3  # RGB通道后的起始索引
+        for method in self.all_edge_methods:
+            self.edge_channel_indices[method] = start_idx
+            start_idx += 1
     
     def load_model(self, model_path: str):
-        """加载模型 (需要根据具体模型类型调整)"""
+        """加载模型 (支持加载完整模型或仅状态字典)"""
         try:
-            model = torch.load(model_path, map_location='cpu')
+            # 从模型名称中解析边缘检测方法
+            model_name = os.path.basename(model_path)
+            edge_methods = []
+            if 'canny' in model_name.lower():
+                edge_methods.append('canny')
+            if 'sobel' in model_name.lower():
+                edge_methods.append('sobel')
+            if 'laplacian' in model_name.lower():
+                edge_methods.append('laplacian')
+            
+            # 根据边缘检测方法确定输入通道数和通道索引
+            in_channels = 3 + len(edge_methods)  # RGB + 每种边缘检测方法一个通道
+            channel_indices = list(range(3))  # RGB通道
+            for method in edge_methods:
+                if method in self.edge_channel_indices:
+                    channel_indices.append(self.edge_channel_indices[method])
+            
+            # 加载模型文件
+            checkpoint = torch.load(model_path, map_location='cpu')
+            
+            # 检查加载的对象类型并获取状态字典
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            elif isinstance(checkpoint, dict) and all(isinstance(k, str) for k in checkpoint.keys()):
+                state_dict = checkpoint
+            elif hasattr(checkpoint, 'state_dict'):
+                state_dict = checkpoint.state_dict()
+            else:
+                model = checkpoint
+                model.eval()
+                return model, channel_indices
+            
+            # 处理DataParallel的键名前缀
+            if any(key.startswith('module.') for key in state_dict.keys()):
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    name = k[7:] if k.startswith('module.') else k
+                    new_state_dict[name] = v
+                state_dict = new_state_dict
+            
+            # 创建模型实例并加载权重
+            model = SimpleSRCNN(in_channels=in_channels)
+            model.load_state_dict(state_dict, strict=False)
             model.eval()
+            model.to(self.device)
+            
+            return model, channel_indices
+            
+        except Exception as e:
+            print(f"Error loading model {model_path}: {e}")
+            return None, None
+
+            checkpoint = torch.load(model_path, map_location='cpu')
+            
+            # 检查加载的对象是否为状态字典（OrderedDict）
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                # 如果是带有state_dict键的字典，提取状态字典
+                state_dict = checkpoint['state_dict']
+            elif isinstance(checkpoint, dict) and all(isinstance(k, str) for k in checkpoint.keys()):
+                # 如果是纯状态字典
+                state_dict = checkpoint
+            elif hasattr(checkpoint, 'state_dict'):
+                # 如果是模型对象但有state_dict方法
+                state_dict = checkpoint.state_dict()
+            else:
+                # 如果是完整模型对象
+                model = checkpoint
+                model.eval()
+                return model
+            # 处理可能的键名不匹配问题
+            if any(key.startswith('module.') for key in state_dict.keys()):
+                # 如果状态字典中的键以'module.'开头，说明模型是用DataParallel训练的
+                # 需要移除'module.'前缀
+                from collections import OrderedDict
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    name = k[7:] if k.startswith('module.') else k  # 移除'module.'前缀
+                    new_state_dict[name] = v
+                state_dict = new_state_dict
+            # 创建SimpleSRCNN模型实例
+            model = SimpleSRCNN(in_channels=in_channels)
+            # 加载状态字典到模型
+            model.load_state_dict(state_dict, strict=False)
+            model.eval()
+            model.to(self.device) # 将模型移动到指定设备
+            
+            # 更新边缘检测方法列表，使其与模型期望的输入通道数一致
+            self.edge_detection_methods = edge_methods
+            
+            # 重新创建数据集，使用ModelValidator实例中存储的参数
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            self.dataset = SuperResolutionDataset(
+                lr_path=self.val_lr_path,
+                hr_path=self.val_hr_path,
+                transform=transform,
+                edge_methods=self.edge_detection_methods,
+                device=self.device,
+                lr_patch_size=self.lr_patch_size,
+                upscale_factor=self.upscale_factor,
+                image_size=self.image_size
+            )
+            self.dataloader = DataLoader(self.dataset, batch_size=1, shuffle=False)
+            return model
+        except Exception as e:
+            print(f"Error loading model {model_path}: {e}")
+            return None
+
+            checkpoint = torch.load(model_path, map_location='cpu')
+            
+            # 检查加载的对象是否为状态字典（OrderedDict）
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                # 如果是带有state_dict键的字典，提取状态字典
+                state_dict = checkpoint['state_dict']
+            elif isinstance(checkpoint, dict) and all(isinstance(k, str) for k in checkpoint.keys()):
+                # 如果是纯状态字典
+                state_dict = checkpoint
+            elif hasattr(checkpoint, 'state_dict'):
+                # 如果是模型对象但有state_dict方法
+                state_dict = checkpoint.state_dict()
+            else:
+                # 如果是完整模型对象
+                model = checkpoint
+                model.eval()
+                return model
+            
+            # 处理可能的键名不匹配问题
+            if any(key.startswith('module.') for key in state_dict.keys()):
+                # 如果状态字典中的键以'module.'开头，说明模型是用DataParallel训练的
+                # 需要移除'module.'前缀
+                from collections import OrderedDict
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    name = k[7:] if k.startswith('module.') else k  # 移除'module.'前缀
+                    new_state_dict[name] = v
+                state_dict = new_state_dict
+            
+            # 创建SimpleSRCNN模型实例
+            model = SimpleSRCNN(in_channels=in_channels)
+            
+            # 加载状态字典到模型
+            model.load_state_dict(state_dict, strict=False)
+            model.eval()
+            
+            # 重新创建数据集，使用ModelValidator实例中存储的参数
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            self.dataset = SuperResolutionDataset(
+                lr_path=self.val_lr_path,
+                hr_path=self.val_hr_path,
+                transform=transform,
+                edge_methods=self.edge_detection_methods,
+                device=self.device,
+                lr_patch_size=self.lr_patch_size,
+                upscale_factor=self.upscale_factor,
+                image_size=self.image_size
+            )
+            self.dataloader = DataLoader(self.dataset, batch_size=1, shuffle=False)
+            
             return model
         except Exception as e:
             print(f"Error loading model {model_path}: {e}")
             return None
     
-    def validate_model(self, model_path: str, model_name: str = None) -> Dict:
-        """验证单个模型"""
+    def validate_model(self, model_path: str, model_name: str = None, num_samples: int = 100) -> Dict:
+        """验证单个模型
+        
+        Args:
+            model_path: 模型路径
+            model_name: 模型名称
+            num_samples: 验证样本数量，默认为10。TODO: 后续修改为全部样本
+        """
         if model_name is None:
             model_name = os.path.basename(model_path)
         
         print(f"Validating model: {model_name}")
         
-        # 加载模型
-        model = self.load_model(model_path)
-        if model is None:
+        # 加载模型和获取所需的通道索引
+        model, channel_indices = self.load_model(model_path)
+        if model is None or channel_indices is None:
             return None
         
         results = {
@@ -209,16 +388,34 @@ class ModelValidator:
             'sample_results': []  # 存储前两个样本的详细结果
         }
         
+        # 限制验证样本数量
+        total_samples = len(self.dataloader)
+        samples_to_process = min(num_samples, total_samples)
+        print(f"Processing {samples_to_process} samples out of {total_samples} total samples")
+        
         with torch.no_grad():
-            for i, (lr_batch, hr_batch, indices) in enumerate(self.dataloader):
+            for i, data in enumerate(self.dataloader):
+                if i >= samples_to_process:
+                    break
+                    
                 try:
-                    # 模型推理 (这里需要根据具体模型调整)
+                    # 从data中解包lr_batch和hr_batch
+                    lr_batch, hr_batch = data
+                    
+                    # 选择模型所需的通道
+                    lr_batch = lr_batch[:, channel_indices, :, :]
+                    
+                    # 将数据移动到指定设备
+                    lr_batch = lr_batch.to(self.device)
+                    hr_batch = hr_batch.to(self.device)
+                    
+                    # 模型推理
                     sr_batch = model(lr_batch)
                     
-                    # 转换为numpy数组
-                    lr_img = (lr_batch[0].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-                    hr_img = (hr_batch[0].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-                    sr_img = (sr_batch[0].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                    # 转换为numpy数组，只保留RGB通道
+                    lr_img = (lr_batch[0, :3].cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                    hr_img = (hr_batch[0, :3].cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                    sr_img = (sr_batch[0].cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
                     
                     # 计算基础指标
                     psnr = self.metrics_calc.psnr(hr_img, sr_img)
@@ -234,12 +431,12 @@ class ModelValidator:
                     results['lpips_scores'].append(lpips)
                     results['edge_preservation_scores'].append(structure_analysis['edge_preservation'])
                     results['skeleton_preservation_scores'].append(structure_analysis['skeleton_preservation'])
-                    results['sample_indices'].append(indices[0].item())
+                    results['sample_indices'].append(i)  # 使用循环索引作为样本索引
                     
                     # 保存前两个样本的详细结果用于展示
                     if i < 2:
                         sample_result = {
-                            'index': indices[0].item(),
+                            'index': i,  # 使用循环索引
                             'lr_img': lr_img,
                             'hr_img': hr_img,
                             'sr_img': sr_img,
@@ -438,13 +635,14 @@ class ModelValidator:
         
         print(f"Results saved to {save_path}")
 
-def unified_model_evaluation(model_paths: List[str], val_dataset_path: str, model_names: List[str] = None, output_dir: str = './evaluation_results'):
+def unified_model_evaluation(config: ExperimentConfig, model_paths: List[str], model_names: List[str] = None, output_dir: str = './evaluation_results'):
     """
     统一验证多个模型在同一验证集上的性能
     
     Args:
         model_paths: 多个模型的路径列表
-        val_dataset_path: 验证集路径
+        val_lr_path: 验证集低分辨率图像路径
+        val_hr_path: 验证集高分辨率图像路径
         model_names: 模型名称列表，如果为None则使用模型文件名
         output_dir: 输出结果保存目录
         
@@ -455,7 +653,7 @@ def unified_model_evaluation(model_paths: List[str], val_dataset_path: str, mode
     os.makedirs(output_dir, exist_ok=True)
     
     # 初始化验证器
-    validator = ModelValidator(val_dataset_path)
+    validator = ModelValidator(config)
     
     # 验证所有模型
     print("开始统一模型验证...")
@@ -487,18 +685,37 @@ def unified_model_evaluation(model_paths: List[str], val_dataset_path: str, mode
 
 # 使用示例
 def main():
-    # 配置参数
-    val_dataset_path = "/path/to/validation/dataset"  # 验证集路径
+    # 加载配置
+    config = ExperimentConfig()
+    
+    # 配置参数 (从config中获取验证集路径)
+    val_lr_path = config.VAL_LR_DIR
+    val_hr_path = config.VAL_HR_DIR
+    
     model_paths = [
-        "/path/to/model1.pth",
-        "/path/to/model2.pth",
-        "/path/to/model3.pth"
+        "./results_edge_experiments/no_edge_mse_20250522-143215/no_edge_mse_best.pth",
+        "./results_edge_experiments/canny_edge_combined_loss_20250523-013145/canny_edge_combined_loss_best.pth",
+        "./results_edge_experiments/canny_edge_mse_20250522-185553/canny_edge_mse_best.pth",
+        "./results_edge_experiments/canny_laplacian_edge_combined_loss_20250523-130522/canny_laplacian_edge_combined_loss_best.pth",
+        "./results_edge_experiments/laplacian_edge_combined_loss_20250523-084104/laplacian_edge_combined_loss_best.pth",
+        "./results_edge_experiments/laplacian_edge_mse_20250523-063049/laplacian_edge_mse_best.pth"
+        "./results_edge_experiments/sobel_canny_edge_mse_20250522-090149/sobel_canny_edge_mse_best.pth",
+        "./results_edge_experiments/sobel_edge_mse_20250522-164323/sobel_edge_mse_best.pth"
     ]
-    model_names = ["ESRGAN", "EDSR", "SwinIR"]
+    model_names = [
+        "no_edge_mse", 
+        "canny_edge_combined", 
+        "canny_edge_mse",
+        "canny_laplacian_edge_combined_loss",
+        "laplacian_edge_combined_loss",
+        "laplacian_edge_mse",
+        "sobel_canny_edge_mse",
+        "sobel_edge_mse"
+    ]
     output_dir = "./evaluation_results"
     
     # 调用统一验证函数
-    unified_model_evaluation(model_paths, val_dataset_path, model_names, output_dir)
+    unified_model_evaluation(config, model_paths, model_names, output_dir)
 
 if __name__ == "__main__":
     main()
