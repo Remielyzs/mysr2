@@ -19,8 +19,9 @@
     *   为训练和评估提供不同的数据加载流程。
     *   能够处理与图像相关的文本描述信息，并已支持合成数据生成。
 2.  **模型定义 (`models/`)**:
-    *   包含所有模型定义的Python文件，例如 `models/simple_srcnn.py`。
-    *   已实现多种超分辨率模型，并定义了其网络结构。
+    *   包含所有模型定义的Python文件，例如 `models/simple_srcnn.py`、`models/diffusion_sr.py`。
+    *   已实现多种超分辨率模型，包括传统CNN模型和先进的扩散模型。
+    *   **扩散模型 (`diffusion_sr.py`)**：实现了完整的U-Net架构，包含时间嵌入、残差块、注意力机制等核心组件，支持DDPM训练和推理。
     *   模型能够接收低分辨率 (LR) 图像和可选的文本描述作为输入。
     *   在训练时，使用高分辨率 (HR) 图像作为真值 (ground truth)。
     *   在评估时，根据 LR 图像和文本描述生成超分辨率 (SR) 图像。
@@ -38,8 +39,12 @@
 
 -   Python
 -   PyTorch
+-   PyTorch Lightning（可选）
 -   Pillow (PIL)
 -   NumPy
+-   torchmetrics（评估指标）
+-   pathlib（路径管理）
+-   logging（日志系统）
 
 ## 目录结构
 
@@ -59,15 +64,22 @@ mysr2/
 │   ├── __init__.py
 │   ├── simple_srcnn.py       # SimpleSRCNN模型
 │   ├── basic_sr.py           # 基础超分辨率模型
+│   ├── diffusion_sr.py       # 扩散模型（U-Net架构）
 │   └── ...                   # 其他模型定义
 ├── trainers/                 # 训练器目录
 │   ├── base_trainer.py       # 基础训练器
 │   ├── sr_trainer.py         # 超分辨率训练器
+│   ├── diffusion_trainer.py  # 扩散模型训练器
 │   └── train_config.py       # 训练配置
 ├── train.py                  # 模型训练脚本
 ├── train_controller.py       # 训练控制器
+├── train_diffusion.py        # 扩散模型训练脚本
+├── train_optimized.py        # 优化训练脚本（梯度累积+混合精度）
 ├── utils/                    # 工具函数目录
+│   ├── config_manager.py     # 配置管理器
+│   ├── logger.py             # 训练日志器
 │   └── evaluation_utils.py   # 评估工具
+├── test_improvements.py      # 改进功能测试脚本
 ├── requirements.txt          # Python依赖包
 └── README.md                 # 项目说明文档
 ```
@@ -91,10 +103,33 @@ pip install -r requirements.txt
 
 ### 3. 模型训练
 
-项目现在使用实验配置和训练控制器来管理训练流程。运行训练脚本：
+项目支持多种训练方式：
+
+#### 传统模型训练
+项目使用实验配置和训练控制器来管理传统CNN模型的训练流程：
 
 ```bash
 python train_controller.py
+```
+
+#### 扩散模型训练
+对于扩散模型，使用专门的训练脚本：
+
+```bash
+python train_diffusion.py
+```
+
+扩散模型训练特点：
+- 支持线性和余弦噪声调度策略
+- 集成梯度累积和混合精度训练
+- 通过逐步去噪学习生成高质量超分辨率图像
+- 提供多种配置选项（基础、优化、快速测试）
+
+#### 优化训练（梯度累积+混合精度）
+使用优化的训练脚本，支持梯度累积和混合精度：
+
+```bash
+python train_optimized.py
 ```
 
 训练配置分为两个层次：
@@ -235,6 +270,122 @@ python evaluate.py --mode dataset \
 -   **批大小为1 (Batch Size = 1)**: 如果训练时设置 `batch_size = 1`，则可以直接处理可变尺寸的输入图像，无需裁剪或缩放，只要内存允许。
 -   **数据加载器 (`data_utils.py`)**: 当前的 `SRDataset` 在加载图像时并未强制统一尺寸。如果您计划使用大于1的批大小并遇到尺寸不匹配的错误，您需要在数据预处理阶段（例如在 `SRDataset` 的 `__getitem__` 方法中，或者通过 `transforms`）加入图像裁剪或缩放的逻辑。
 -   **评估阶段**: 在评估单个图像时，通常可以直接使用原始尺寸的图像，因为不需要批处理。
+
+## 最新改进 (2024年更新)
+
+### 1. 统一配置管理系统 (ConfigManager)
+
+项目引入了 `utils/config_manager.py` 中的 `ConfigManager` 类，提供：
+
+- **统一配置接口**：支持字典式访问和更新配置参数
+- **配置验证**：自动验证必需参数和数据类型
+- **路径验证**：检查数据目录路径的有效性
+- **配置继承**：支持基础配置和实验特定配置的组合
+- **序列化支持**：配置的保存和加载功能
+
+```python
+# 使用示例
+from utils.config_manager import ConfigManager
+
+# 创建配置管理器
+config = ConfigManager({
+    'batch_size': 8,
+    'learning_rate': 1e-4,
+    'train_lr_dir': 'data/train/lr',
+    'train_hr_dir': 'data/train/hr',
+    'val_lr_dir': 'data/val/lr',
+    'val_hr_dir': 'data/val/hr'
+})
+
+# 更新配置
+config.update_config({'batch_size': 16})
+
+# 访问配置
+batch_size = config.get('batch_size')
+device = config.get('device', 'cpu')  # 带默认值
+```
+
+### 2. 结构化日志系统 (TrainingLogger)
+
+新增 `utils/logger.py` 中的 `TrainingLogger` 类，提供：
+
+- **多级别日志**：支持 DEBUG、INFO、WARNING、ERROR、CRITICAL 级别
+- **结构化记录**：自动记录训练指标、模型信息、配置等
+- **文件和控制台输出**：同时支持文件保存和控制台显示
+- **训练报告生成**：自动生成训练摘要和报告
+- **GPU内存监控**：记录GPU内存使用情况
+
+```python
+# 使用示例
+from utils.logger import TrainingLogger
+
+# 创建日志器
+logger = TrainingLogger(
+    name="training",
+    log_dir="logs",
+    level="INFO"
+)
+
+# 记录训练过程
+logger.log_epoch_start(epoch=0, total_epochs=100)
+logger.log_batch_metrics(batch_idx=10, total_batches=100, loss=0.5)
+logger.log_epoch_end(epoch=0, train_loss=0.4, val_loss=0.3)
+
+# 生成训练报告
+report = logger.create_training_report()
+```
+
+### 3. 增强的训练器架构
+
+#### BaseTrainer 改进
+- **统一错误处理**：所有关键操作都包装在 try-catch 块中
+- **自动目录管理**：自动创建和验证必要的目录结构
+- **集成日志系统**：与 TrainingLogger 深度集成
+- **配置管理集成**：使用 ConfigManager 进行统一配置管理
+
+#### DiffusionTrainer 修复
+- **修复 AttributeError**：解决了 `results_dir` 等属性缺失的问题
+- **目录自动创建**：确保所有必要目录在训练前创建
+- **错误日志增强**：添加详细的错误追踪和日志记录
+
+### 4. 健壮的错误处理机制
+
+- **全面异常捕获**：关键操作都有适当的异常处理
+- **详细错误日志**：使用 traceback 记录完整的错误堆栈
+- **优雅降级**：在非关键错误时继续执行
+- **用户友好的错误信息**：提供清晰的错误描述和解决建议
+
+### 5. 自动化测试框架
+
+新增 `test_improvements.py` 测试脚本，验证：
+- ConfigManager 的配置管理功能
+- TrainingLogger 的日志记录功能
+- 训练器的初始化和目录管理
+- 错误处理机制的有效性
+- 配置继承和验证功能
+
+运行测试：
+```bash
+python test_improvements.py
+```
+
+### 6. 改进的目录结构管理
+
+训练器现在自动创建和管理以下目录结构：
+```
+run_dir/
+├── checkpoints/     # 模型检查点
+├── results/         # 训练结果
+├── logs/           # 日志文件
+└── images/         # 生成的图像
+```
+
+### 7. 配置验证和类型检查
+
+- **必需参数检查**：确保所有必需的配置项都已提供
+- **类型验证**：验证配置参数的数据类型
+- **范围检查**：验证数值参数的合理范围
+- **路径验证**：检查文件和目录路径的存在性
 
 ## 后续工作与展望
 

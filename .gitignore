@@ -11,7 +11,7 @@ __pycache__/
 # Ignore model checkpoints and saved models
 *.pth
 checkpoints/
-
+*.log
 # Ignore results and temporary data directories
 results/
 results_edge_experiments/

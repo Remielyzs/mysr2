@@ -211,8 +211,8 @@ class SRDataset(torch.utils.data.Dataset):
             hr_patch = hr_img.crop((hr_x, hr_y, hr_x + hr_patch_size, hr_y + hr_patch_size))
 
             # Apply transform (ToTensor) to patches
-            lr_tensor_pil = self.transform(lr_patch).to(self.device) if self.transform else transforms.ToTensor()(lr_patch).to(self.device)
-            hr_tensor_pil = self.transform(hr_patch).to(self.device) if self.transform else transforms.ToTensor()(hr_patch).to(self.device)
+            lr_tensor_pil = self.transform(lr_patch) if self.transform else transforms.ToTensor()(lr_patch)
+            hr_tensor_pil = self.transform(hr_patch) if self.transform else transforms.ToTensor()(hr_patch)
 
             # Get text description for the patch if available
             if self.text_descriptions:
@@ -228,9 +228,9 @@ class SRDataset(torch.utils.data.Dataset):
                  hr_img = self.hr_resize_transform(hr_img)
 
              # Apply transform (ToTensor) to full images
-             lr_tensor_pil = self.transform(lr_img).to(self.device) if self.transform else transforms.ToTensor()(lr_img).to(self.device)
+             lr_tensor_pil = self.transform(lr_img) if self.transform else transforms.ToTensor()(lr_img)
              # If hr_img is None, set hr_tensor_pil to an empty tensor
-             hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else torch.empty(0).to(self.device))
+             hr_tensor_pil = self.transform(hr_img) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img) if hr_img is not None else torch.empty(0))
 
              # Get text description for the image if available
              if self.text_descriptions:
@@ -238,9 +238,9 @@ class SRDataset(torch.utils.data.Dataset):
 
         else:
             # Default case (e.g., no patching/resizing specified)
-            lr_tensor_pil = self.transform(lr_img).to(self.device) if self.transform else transforms.ToTensor()(lr_img).to(self.device)
+            lr_tensor_pil = self.transform(lr_img) if self.transform else transforms.ToTensor()(lr_img)
             # If hr_img is None, set hr_tensor_pil to an empty tensor
-            hr_tensor_pil = self.transform(hr_img).to(self.device) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img).to(self.device) if hr_img is not None else torch.empty(0).to(self.device))
+            hr_tensor_pil = self.transform(hr_img) if hr_img is not None and self.transform else (transforms.ToTensor()(hr_img) if hr_img is not None else torch.empty(0))
 
             # Get text description if available
             if self.text_descriptions:
