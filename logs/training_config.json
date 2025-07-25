@@ -1,0 +1,42 @@
+{
+  "device": "cuda",
+  "model_name": "diffusion_sr",
+  "results_base_dir": "results",
+  "checkpoint_dir": "checkpoints",
+  "epochs": 5,
+  "batch_size": 2,
+  "learning_rate": 0.0001,
+  "weight_decay": 0.01,
+  "num_workers": 2,
+  "patch_size": 64,
+  "upscale_factor": 4,
+  "use_mixed_precision": true,
+  "accumulation_steps": 1,
+  "gradient_clip_val": 1.0,
+  "early_stopping_patience": null,
+  "early_stopping_min_delta": 0.001,
+  "num_timesteps": 1000,
+  "beta_start": 0.001,
+  "beta_end": 0.02,
+  "noise_schedule": "linear",
+  "unet_channels": [
+    32,
+    64,
+    128
+  ],
+  "attention_resolutions": [
+    16,
+    8
+  ],
+  "num_res_blocks": 2,
+  "dropout": 0.0,
+  "data_dir": "data\\split_sample",
+  "train_lr_dir": "data\\split_sample\\train\\lr",
+  "train_hr_dir": "data\\split_sample\\train\\hr",
+  "val_lr_dir": "data\\split_sample\\val\\lr",
+  "val_hr_dir": "data\\split_sample\\val\\hr",
+  "stop_on_error": true,
+  "require_checkpoint": false,
+  "console_logging": true,
+  "log_dir": "logs"
+}

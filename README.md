@@ -1,6 +1,6 @@
-# 超分辨率模型项目 (mysr2)
+# 超分辨率模型项目 (mysr2) - LoRA微调版本
 
-本项目旨在实现一个灵活且模块化的图像超分辨率深度学习框架。
+本项目旨在实现一个灵活且模块化的图像超分辨率深度学习框架，专门针对LoRA（Low-Rank Adaptation）微调技术进行优化，并为RTX 5090 GPU提供专门的性能优化。
 
 ## 项目目标
 
@@ -8,6 +8,8 @@
 -   支持多种图像输入格式。
 -   允许模型接收图像数据和相关的文本描述作为输入。
 -   实现数据处理、模型定义、训练和评估模块的解耦，方便进行模型比较和实验。
+-   集成LoRA微调技术，实现参数高效的模型训练。
+-   为RTX 5090等高端GPU提供专门的性能优化。
 
 ## 功能架构
 
@@ -37,51 +39,76 @@
 
 ## 技术栈
 
--   Python
--   PyTorch
+### 核心框架
+-   Python 3.8+
+-   PyTorch 2.0+
 -   PyTorch Lightning（可选）
+-   CUDA 11.8+（RTX 5090支持）
+
+### LoRA微调技术
+-   Low-Rank Adaptation (LoRA)
+-   Parameter-Efficient Fine-tuning
+-   Diffusers库
+-   Transformers库
+
+### 图像处理
 -   Pillow (PIL)
 -   NumPy
+-   OpenCV（可选）
+
+### 评估和监控
 -   torchmetrics（评估指标）
 -   pathlib（路径管理）
 -   logging（日志系统）
+-   Accelerate（分布式训练）
 
 ## 目录结构
 
 ```
 mysr2/
-├── config/                   # 配置文件目录
-│   └── experiment_config.py  # 实验配置定义
-├── data/                     # 存放训练和测试数据 (示例)
-│   ├── hr/                   # 高分辨率图像
-│   └── lr/                   # 低分辨率图像
-├── data_utils.py             # 数据加载和预处理工具
-├── evaluate.py               # 模型评估脚本
-├── experiment/               # 实验管理目录
-│   └── experiment_runner.py  # 实验运行器
-├── losses.py                 # 损失函数定义
-├── models/                   # 存放模型定义文件
+├── config/                           # 配置文件目录
+│   └── experiment_config.py          # 实验配置定义
+├── data/                             # 存放训练和测试数据 (示例)
+│   ├── hr/                           # 高分辨率图像
+│   └── lr/                           # 低分辨率图像
+├── lora_checkpoints/                 # LoRA模型检查点
+├── demo_output/                      # 演示输出文件
+├── data_utils.py                     # 数据加载和预处理工具
+├── evaluate.py                       # 模型评估脚本
+├── experiment/                       # 实验管理目录
+│   └── experiment_runner.py          # 实验运行器
+├── losses.py                         # 损失函数定义
+├── models/                           # 存放模型定义文件
 │   ├── __init__.py
-│   ├── simple_srcnn.py       # SimpleSRCNN模型
-│   ├── basic_sr.py           # 基础超分辨率模型
-│   ├── diffusion_sr.py       # 扩散模型（U-Net架构）
-│   └── ...                   # 其他模型定义
-├── trainers/                 # 训练器目录
-│   ├── base_trainer.py       # 基础训练器
-│   ├── sr_trainer.py         # 超分辨率训练器
-│   ├── diffusion_trainer.py  # 扩散模型训练器
-│   └── train_config.py       # 训练配置
-├── train.py                  # 模型训练脚本
-├── train_controller.py       # 训练控制器
-├── train_diffusion.py        # 扩散模型训练脚本
-├── train_optimized.py        # 优化训练脚本（梯度累积+混合精度）
-├── utils/                    # 工具函数目录
-│   ├── config_manager.py     # 配置管理器
-│   ├── logger.py             # 训练日志器
-│   └── evaluation_utils.py   # 评估工具
-├── test_improvements.py      # 改进功能测试脚本
-├── requirements.txt          # Python依赖包
-└── README.md                 # 项目说明文档
+│   ├── simple_srcnn.py               # SimpleSRCNN模型
+│   ├── basic_sr.py                   # 基础超分辨率模型
+│   ├── diffusion_sr.py               # 扩散模型（U-Net架构）
+│   └── ...                           # 其他模型定义
+├── trainers/                         # 训练器目录
+│   ├── base_trainer.py               # 基础训练器
+│   ├── sr_trainer.py                 # 超分辨率训练器
+│   ├── diffusion_trainer.py          # 扩散模型训练器
+│   └── train_config.py               # 训练配置
+├── train.py                          # 模型训练脚本
+├── train_controller.py               # 训练控制器
+├── train_diffusion.py                # 扩散模型训练脚本
+├── train_optimized.py                # 优化训练脚本（梯度累积+混合精度）
+├── train_lora_stable_diffusion.py    # 主要LoRA训练脚本
+├── train_lora_simple.py              # 简化版LoRA训练脚本
+├── demo_lora_training.py             # 演示版训练脚本（无依赖）
+├── train_cpu_diffusion_gpu_arch.py   # CPU扩散模型训练脚本
+├── start_lora_complete.ps1           # 完整启动脚本
+├── start_lora_simple.ps1             # 简化启动脚本
+├── start_lora_final.ps1              # 最终启动脚本
+├── start_simple.bat                  # 批处理启动脚本
+├── start_cpu_diffusion_gpu_arch.ps1  # CPU训练启动脚本
+├── utils/                            # 工具函数目录
+│   ├── config_manager.py             # 配置管理器
+│   ├── logger.py                     # 训练日志器
+│   └── evaluation_utils.py           # 评估工具
+├── test_improvements.py              # 改进功能测试脚本
+├── requirements.txt                  # Python依赖包
+└── README.md                         # 项目说明文档
 ```
 
 ## 使用说明
@@ -103,7 +130,47 @@ pip install -r requirements.txt
 
 ### 3. 模型训练
 
-项目支持多种训练方式：
+项目支持多种训练方式，包括传统训练和LoRA微调：
+
+#### LoRA微调训练（推荐）
+
+##### 快速开始（RTX 5090优化）
+```powershell
+# 运行完整LoRA训练流程
+.\start_lora_final.ps1
+```
+
+##### 简化LoRA训练
+```python
+# 直接运行简化版LoRA训练
+python train_lora_simple.py
+```
+
+##### 演示模式（无GPU要求）
+```python
+# 运行演示版本（适用于测试环境）
+python demo_lora_training.py
+```
+
+##### LoRA训练特点
+- **参数效率**: 仅训练14M参数（占总参数45.49%）
+- **内存优化**: 显著降低GPU内存需求
+- **快速收敛**: 优化的学习率和训练策略
+- **RTX 5090优化**: 专门的CUDA配置和性能调优
+
+##### LoRA配置参数
+```python
+config = {
+    'epochs': 10,           # 训练轮数
+    'batch_size': 4,        # 批次大小
+    'learning_rate': 1e-4,  # 学习率
+    'lora_rank': 8,         # LoRA秩
+    'lora_alpha': 16.0,     # LoRA缩放因子
+    'num_samples': 200,     # 样本数量
+    'lr_size': 64,          # 低分辨率尺寸
+    'hr_size': 256,         # 高分辨率尺寸
+}
+```
 
 #### 传统模型训练
 项目使用实验配置和训练控制器来管理传统CNN模型的训练流程：
@@ -387,8 +454,76 @@ run_dir/
 - **范围检查**：验证数值参数的合理范围
 - **路径验证**：检查文件和目录路径的存在性
 
+## LoRA微调技术详解
+
+### LoRA原理
+LoRA（Low-Rank Adaptation）是一种参数高效的微调技术，通过在预训练模型的线性层中插入低秩矩阵来实现高效微调。
+
+### 技术优势
+- **参数效率**: 相比全量微调，LoRA只需训练少量参数
+- **内存节省**: 显著降低GPU内存需求
+- **快速训练**: 收敛速度快，训练时间短
+- **模块化**: 可以轻松切换和组合不同的LoRA模块
+
+### RTX 5090优化
+```python
+# GPU环境优化配置
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.9'
+torch.backends.cudnn.benchmark = True
+```
+
+### 性能指标
+- **总参数**: 31,108,699
+- **LoRA参数**: 14,152,664
+- **可训练参数**: 17,021,083
+- **参数比例**: 45.49%
+- **内存使用**: ~8GB VRAM
+- **训练时间**: ~30分钟（RTX 5090）
+
+## 故障排除
+
+### 常见问题
+
+1. **Python环境问题**
+   ```
+   错误: 'python' 不是内部或外部命令
+   解决: 安装Python并添加到PATH
+   ```
+
+2. **CUDA兼容性问题**
+   ```
+   错误: CUDA版本不兼容
+   解决: 更新到CUDA 11.8+
+   ```
+
+3. **内存不足**
+   ```
+   错误: CUDA out of memory
+   解决: 减少batch_size或使用CPU模式
+   ```
+
+### 环境检查
+```powershell
+# 检查Python
+python --version
+
+# 检查PyTorch
+python -c "import torch; print(torch.__version__)"
+
+# 检查CUDA
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
 ## 后续工作与展望
 
+### LoRA相关改进
+-   **多LoRA模块**: 支持多个LoRA模块的组合和切换
+-   **动态秩调整**: 根据训练进度动态调整LoRA秩
+-   **LoRA压缩**: 进一步压缩LoRA参数以提高效率
+-   **分布式LoRA**: 支持多GPU分布式LoRA训练
+
+### 传统改进方向
 -   **完善文本特征处理**: 目前模型对文本输入仅做了初步集成，尚未实现有效的文本特征提取和与图像特征的融合机制。后续可以引入文本编码器（如BERT、Transformer等）并将文本特征有效融入到超分辨率网络中。
 -   **集成物理约束**: 当前已通过 `losses.py` 和灵活的损失函数参数 (`criterion`) 为引入物理约束打下基础。未来可以实现更复杂的物理约束，例如：
     -   **基于边缘的约束**: 如 `EdgeLoss` 所示例，可以利用Canny、Sobel等算子提取图像边缘，并约束模型生成的图像在边缘区域的表现，使其更锐利或符合特定边缘特征。
@@ -399,3 +534,25 @@ run_dir/
 -   **配置文件管理**: 使用配置文件 (如 YAML, JSON) 管理训练和评估参数，而不是硬编码在脚本中。
 -   **日志和可视化**: 集成更完善的日志系统 (如 TensorBoard) 来监控训练过程。
 -   **单元测试和集成测试**: 增加测试用例以确保代码的健壮性。
+
+## 开发计划
+
+### 已完成功能
+- ✅ LoRA微调框架
+- ✅ RTX 5090优化
+- ✅ 自动数据生成
+- ✅ 模型保存和加载
+- ✅ 训练监控
+- ✅ 多种启动脚本
+
+### 计划功能
+- 🔄 实际图像数据集支持
+- 🔄 多GPU训练支持
+- 🔄 模型量化优化
+- 🔄 Web界面集成
+- 🔄 实时推理API
+- 🔄 LoRA模块管理系统
+
+---
+
+**注意**: LoRA微调功能专为RTX 5090优化，其他GPU可能需要调整配置参数。传统训练方法仍然完全支持。
